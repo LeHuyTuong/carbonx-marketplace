@@ -6,7 +6,40 @@ Nguyên tắc cốt lõi của backend: **mọi thay đổi số dư ví đều 
 
 Spring Boot 3.3 / Java 17 / MySQL 8 · React 19 + Vite 6 + Tailwind 4 + TypeScript · Docker Compose
 
+![CarbonX — Sàn giao dịch tín chỉ carbon xe điện](docs/screenshots/01_home.png)
+
 ---
+
+## Ảnh chụp giao diện
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/02_marketplace.png" width="420" alt="Sàn giao dịch tín chỉ carbon"><br>
+      <sub><b>Sàn giao dịch tín chỉ carbon công khai</b></sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/03_ev_dashboard.png" width="420" alt="Tổng quan Chủ xe điện"><br>
+      <sub><b>Tổng quan Chủ xe điện (KPI, Donut, Hoạt động)</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/04_company_reports.png" width="420" alt="Báo cáo phát thải & 8 luật gian lận"><br>
+      <sub><b>Báo cáo phát thải CSV & 8 luật kiểm tra gian lận</b></sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/05_company_payouts.png" width="420" alt="Chia sẻ doanh thu cho chủ xe điện"><br>
+      <sub><b>Chia sẻ doanh thu (Profit Sharing) theo kWh / tCO₂e</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <img src="docs/screenshots/06_cva_reports.png" width="520" alt="Thẩm định độc lập CVA"><br>
+      <sub><b>Màn hình Thẩm định độc lập CVA (8 luật gian lận + Chấm điểm AI)</b></sub>
+    </td>
+  </tr>
+</table>
 
 ## Vai trò
 
@@ -28,6 +61,29 @@ Spring Boot 3.3 / Java 17 / MySQL 8 · React 19 + Vite 6 + Tailwind 4 + TypeScri
 
 ## Kiến trúc
 
+```mermaid
+flowchart LR
+  subgraph FE["Frontend (React 19 + Vite + Tailwind + Nginx)"]
+    UI["4 Role Dashboards\nEV Owner · Company · CVA · Admin"]
+  end
+  subgraph BE["Backend (Spring Boot 3.3 / Java 17)"]
+    SEC["JWT + RBAC (@PreAuthorize)"]
+    SVC["Domain Services\nMRV · Issuance · Orders · ProfitSharing"]
+    POOL["profitPool (Async)\nFOR UPDATE + Idempotency"]
+  end
+  subgraph DB["MySQL 8"]
+    DATA["Ledger (WalletTransaction)\nCredits · Reports · Orders"]
+  end
+  subgraph EXT["Third Party"]
+    PAY["VNPay · Stripe · PayPal"]
+    AI["Gemini AI · S3 Storage"]
+  end
+
+  UI -- "HTTPS / REST + SSE" --> SEC --> SVC --> POOL --> DATA
+  SVC --> PAY
+  SVC --> AI
+```
+
 ```
 frontend/                  React SPA (Vite, Tailwind, React Query, Zustand)
   src/app                  router, layout theo vai trò
@@ -36,8 +92,20 @@ frontend/                  React SPA (Vite, Tailwind, React Query, Zustand)
   src/shared               API client, guard phân quyền, store, tiện ích
 backend/Market_carbon/     Spring Boot API (controller → service → repository)
 docker-compose.yml         MySQL + backend + frontend (Nginx)
-docs/                      kiến trúc, audit, sơ đồ UML
+docs/                      kiến trúc, kiểm toán bảo mật, sơ đồ, ảnh & video demo
 ```
+
+## Tài liệu kỹ thuật & Kiểm toán (`docs/`)
+
+| Tài liệu | Nội dung |
+|---|---|
+| [ARCHITECTURE_AUDIT.md](docs/ARCHITECTURE_AUDIT.md) | Đánh giá tổng thể kiến trúc, điểm nóng kỹ thuật và kế hoạch chuẩn hoá |
+| [00_AUDIT_INDEX.md](docs/architecture/00_AUDIT_INDEX.md) | Chỉ mục 30 tài liệu kiểm toán chuyên sâu trong `docs/architecture/` |
+| [21_MONEY_INVARIANTS_AUDIT.md](docs/architecture/21_MONEY_INVARIANTS_AUDIT.md) | Bất biến tài chính & sổ cái `WalletTransaction` |
+| [23_CONCURRENCY_TRANSACTION_AUDIT.md](docs/architecture/23_CONCURRENCY_TRANSACTION_AUDIT.md) | Phân tích khoá bi quan (`FOR UPDATE`) & giao dịch đa luồng |
+| [20_PAYMENT_STATE_MACHINE_AUDIT.md](docs/architecture/20_PAYMENT_STATE_MACHINE_AUDIT.md) | Máy trạng thái thanh toán (VNPay / Stripe / PayPal) & rút tiền |
+| [SECURITY_AUDIT.md](docs/security/SECURITY_AUDIT.md) | Báo cáo kiểm toán bảo mật OWASP Top 10 & các bản vá đã áp dụng |
+| [remediation/README.md](docs/remediation/README.md) | Lộ trình khắc phục P0 / P1 / P2 & bài học vận hành |
 
 - Xác thực JWT, phân quyền theo vai trò ở cả backend (403) lẫn frontend (`RoleGuard`).
 - Thông báo thời gian thực qua SSE; thanh toán nạp tiền qua Stripe / PayPal / VNPay.
