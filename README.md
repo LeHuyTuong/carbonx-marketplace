@@ -45,11 +45,54 @@ docs/                      kiến trúc, audit, sơ đồ UML
 
 ## Video demo
 
-Mỗi luồng có bản xem trước tự chạy (GIF) và file video đầy đủ (MP4) khi bấm vào:
+Mỗi luồng tự phát trực tiếp (GIF) ngay bên dưới; bấm vào từng luồng để mở phát thẳng bản MP4 sắc nét:
 
-<table><tr><td align="center"><a href="docs/demo/flow01_admin_khoi-tao-du-an.mp4"><img src="docs/demo/flow01_admin_khoi-tao-du-an.gif" width="260" alt="1. Admin khởi tạo dự án"><br>▶ 1. Admin khởi tạo dự án</a></td><td align="center"><a href="docs/demo/flow02_cva_tham-dinh-ho-so-va-bao-cao.mp4"><img src="docs/demo/flow02_cva_tham-dinh-ho-so-va-bao-cao.gif" width="260" alt="2. CVA thẩm định hồ sơ và báo cáo"><br>▶ 2. CVA thẩm định hồ sơ và báo cáo</a></td><td align="center"><a href="docs/demo/flow03_admin_phe-duyet-va-phat-hanh-tin-chi.mp4"><img src="docs/demo/flow03_admin_phe-duyet-va-phat-hanh-tin-chi.gif" width="260" alt="3. Admin phê duyệt và phát hành tín chỉ"><br>▶ 3. Admin phê duyệt và phát hành tín chỉ</a></td></tr><tr><td align="center"><a href="docs/demo/flow04_doanh-nghiep_giao-dich-san-va-thanh-toan.mp4"><img src="docs/demo/flow04_doanh-nghiep_giao-dich-san-va-thanh-toan.gif" width="260" alt="4. Doanh nghiệp giao dịch trên sàn"><br>▶ 4. Doanh nghiệp giao dịch trên sàn</a></td><td align="center"><a href="docs/demo/flow05_doanh-nghiep_chia-se-doanh-thu-profit-sharing.mp4"><img src="docs/demo/flow05_doanh-nghiep_chia-se-doanh-thu-profit-sharing.gif" width="260" alt="5. Chia sẻ doanh thu cho chủ xe"><br>▶ 5. Chia sẻ doanh thu cho chủ xe</a></td><td align="center"><a href="docs/demo/flow06_chu-xe-dien_quan-ly-xe-va-vi.mp4"><img src="docs/demo/flow06_chu-xe-dien_quan-ly-xe-va-vi.gif" width="260" alt="6. Chủ xe quản lý xe và ví"><br>▶ 6. Chủ xe quản lý xe và ví</a></td></tr></table>
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://raw.githubusercontent.com/LeHuyTuong/carbonx-marketplace/main/docs/demo/flow01_admin_khoi-tao-du-an.mp4">
+        <img src="docs/demo/flow01_admin_khoi-tao-du-an.gif" width="420" alt="1. Admin khởi tạo dự án"><br>
+        ▶ 1. Admin khởi tạo dự án (MP4)
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://raw.githubusercontent.com/LeHuyTuong/carbonx-marketplace/main/docs/demo/flow02_cva_tham-dinh-ho-so-va-bao-cao.mp4">
+        <img src="docs/demo/flow02_cva_tham-dinh-ho-so-va-bao-cao.gif" width="420" alt="2. CVA thẩm định hồ sơ và báo cáo"><br>
+        ▶ 2. CVA thẩm định hồ sơ và báo cáo (MP4)
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://raw.githubusercontent.com/LeHuyTuong/carbonx-marketplace/main/docs/demo/flow03_admin_phe-duyet-va-phat-hanh-tin-chi.mp4">
+        <img src="docs/demo/flow03_admin_phe-duyet-va-phat-hanh-tin-chi.gif" width="420" alt="3. Admin phê duyệt và phát hành tín chỉ"><br>
+        ▶ 3. Admin phê duyệt và phát hành tín chỉ (MP4)
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://raw.githubusercontent.com/LeHuyTuong/carbonx-marketplace/main/docs/demo/flow04_doanh-nghiep_giao-dich-san-va-thanh-toan.mp4">
+        <img src="docs/demo/flow04_doanh-nghiep_giao-dich-san-va-thanh-toan.gif" width="420" alt="4. Doanh nghiệp giao dịch trên sàn"><br>
+        ▶ 4. Doanh nghiệp giao dịch trên sàn (MP4)
+      </a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <a href="https://raw.githubusercontent.com/LeHuyTuong/carbonx-marketplace/main/docs/demo/flow05_doanh-nghiep_chia-se-doanh-thu-profit-sharing.mp4">
+        <img src="docs/demo/flow05_doanh-nghiep_chia-se-doanh-thu-profit-sharing.gif" width="420" alt="5. Chia sẻ doanh thu cho chủ xe"><br>
+        ▶ 5. Chia sẻ doanh thu cho chủ xe (MP4)
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://raw.githubusercontent.com/LeHuyTuong/carbonx-marketplace/main/docs/demo/flow06_chu-xe-dien_quan-ly-xe-va-vi.mp4">
+        <img src="docs/demo/flow06_chu-xe-dien_quan-ly-xe-va-vi.gif" width="420" alt="6. Chủ xe quản lý xe và ví"><br>
+        ▶ 6. Chủ xe quản lý xe và ví (MP4)
+      </a>
+    </td>
+  </tr>
+</table>
 
-Toàn bộ file nằm ở [`docs/demo/`](docs/demo/).
+Toàn bộ file gốc nằm ở [`docs/demo/`](docs/demo/).
 
 ## Đa luồng & Chống tranh chấp (Concurrency)
 
