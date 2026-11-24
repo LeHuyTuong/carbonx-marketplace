@@ -1,0 +1,74 @@
+package com.carbonx.marketcarbon.controller;
+
+import com.carbonx.marketcarbon.common.PaymentMethod;
+import com.carbonx.marketcarbon.common.StatusCode;
+import com.carbonx.marketcarbon.dto.request.PaymentOrderRequest;
+import com.carbonx.marketcarbon.dto.response.PaymentOrderResponse;
+import com.carbonx.marketcarbon.model.PaymentOrder;
+import com.carbonx.marketcarbon.service.PaymentService;
+import com.carbonx.marketcarbon.utils.common.ApiRequest;
+import com.carbonx.marketcarbon.utils.common.ApiResponse;
+import com.carbonx.marketcarbon.utils.common.ResponseStatus;
+import com.paypal.base.rest.PayPalRESTException;
+import com.stripe.exception.StripeException;
+import io.swagger.v3.oas.annotations.Operation;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.UUID;
+
+@RequestMapping("/api/v1/payment")
+@RestController
+@RequiredArgsConstructor
+public class PaymentController {
+    private final PaymentService paymentService;
+
+    @Operation(summary = "API to request deposit")
+    @PostMapping
+    public ResponseEntity<ApiResponse<PaymentOrderResponse>> paymentHandler(
+            @Valid @RequestBody ApiRequest<@Valid PaymentOrderRequest> req,
+            @RequestHeader(value = "X-Request-Trace", required = false) String requestTrace,
+            @RequestHeader(value = "X-Request-DateTime", required = false) String requestDateTime)
+            throws StripeException, PayPalRESTException {
+
+        String trace = requestTrace != null ? requestTrace : UUID.randomUUID().toString();
+        String now = requestDateTime != null ? requestDateTime : OffsetDateTime.now(ZoneOffset.UTC).toString();
+
+        PaymentOrderResponse order = paymentService.createOrder(req.getData());
+        PaymentOrderResponse response = order;
+        if(req.getData().getPaymentMethod().equals(PaymentMethod.STRIPE)){
+            response = paymentService.createStripePaymentLink(req.getData(), order.getId());
+        }else if(req.getData().getPaymentMethod().equals(PaymentMethod.PAYPAL)){
+            response = paymentService.createPayPalPaymentLink(req.getData(), order.getId());
+        }
+        response.setAmount(order.getAmount());
+        response.setAmountInVnd(order.getAmountInVnd());
+        response.setId(order.getId());
+        ResponseStatus rs = new ResponseStatus(StatusCode.SUCCESS.getCode(),
+                StatusCode.SUCCESS.getMessage());
+        ApiResponse<PaymentOrderResponse> resp = new ApiResponse<>(trace, now , rs, response);
+        return ResponseEntity.ok(resp);
+    }
+
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<PaymentOrder>>> getAllPaymentsByUser(
+            @RequestHeader(value = "X-Request-Trace", required = false) String requestTrace,
+            @RequestHeader(value = "X-Request-DateTime", required = false) String requestDateTime)
+            throws StripeException {
+
+        String trace = requestTrace != null ? requestTrace : UUID.randomUUID().toString();
+        String now = requestDateTime != null ? requestDateTime : OffsetDateTime.now(ZoneOffset.UTC).toString();
+        List<PaymentOrder> order = paymentService.getAllPaymentByUser();
+        ResponseStatus rs = new ResponseStatus(StatusCode.SUCCESS.getCode(),
+                StatusCode.SUCCESS.getMessage());
+        ApiResponse<List<PaymentOrder>> resp = new ApiResponse<>(trace, now , rs, order);
+        return ResponseEntity.ok(resp);
+    }
+
+
+}

@@ -1,0 +1,477 @@
+package com.carbonx.marketcarbon.service.impl;
+
+import com.carbonx.marketcarbon.common.*;
+import com.carbonx.marketcarbon.common.security.CurrentUserService;
+import com.carbonx.marketcarbon.dto.request.OrderRequest;
+import com.carbonx.marketcarbon.dto.request.WalletTransactionRequest;
+import com.carbonx.marketcarbon.dto.response.CreditTradeResponse;
+import com.carbonx.marketcarbon.exception.AppException;
+import com.carbonx.marketcarbon.exception.ErrorCode;
+import com.carbonx.marketcarbon.exception.ResourceNotFoundException;
+import com.carbonx.marketcarbon.model.*;
+import com.carbonx.marketcarbon.repository.*;
+import com.carbonx.marketcarbon.service.CreditIssuanceService;
+import com.carbonx.marketcarbon.service.OrderService;
+import com.carbonx.marketcarbon.service.WalletTransactionService;
+import jakarta.transaction.Transactional;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class OrderServiceImpl implements OrderService {
+
+    private final OrderRepository orderRepository;
+    private final UserRepository userRepository;
+    private final WalletTransactionService walletTransactionService;
+    private final WalletRepository walletRepository;
+    private final CompanyRepository companyRepository;
+    private final MarketplaceListingRepository marketplaceListingRepository;
+    private final CarbonCreditRepository carbonCreditRepository;
+    private final CreditIssuanceService creditIssuanceService;
+    // P0-B/B3: wallet row locks during settlement
+    private final jakarta.persistence.EntityManager entityManager;
+
+    /**
+     * Optional collaborator: production Spring wiring injects it, while legacy unit tests
+     * that call the generated constructor directly keep the repository-based fallback.
+     */
+    private CurrentUserService currentUserService;
+
+    @Autowired(required = false)
+    public void setCurrentUserService(CurrentUserService currentUserService) {
+        this.currentUserService = currentUserService;
+    }
+
+    private com.carbonx.marketcarbon.repository.AdminRepository adminRepository;
+
+    @Autowired(required = false)
+    public void setAdminRepository(com.carbonx.marketcarbon.repository.AdminRepository adminRepository) {
+        this.adminRepository = adminRepository;
+    }
+
+    @Value("${trading_fee}")
+    private BigDecimal tradingFee;
+
+    // Định nghĩa múi giờ Việt Nam
+    private static final ZoneId VIETNAM_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
+
+    // helper find user login
+    private User currentUser() {
+        if (currentUserService != null) {
+            return currentUserService.getCurrentUser();
+        }
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String email = authentication.getName();
+        User user = userRepository.findByEmail(email);
+        if (user == null) {
+            throw new ResourceNotFoundException("User not found with email: " + email);
+        }
+        return user;
+    }
+
+    // helper find company login
+    private Company currentCompany(User user) {
+        if (currentUserService != null) {
+            return currentUserService.getCurrentCompany();
+        }
+        return companyRepository.findByUserId(user.getId())
+                .orElseThrow(
+                        () -> new ResourceNotFoundException("Company not found with userid: " + user.getId()));
+    }
+
+    // P0-B/N7: caller must be the buyer company OR an ADMIN/CVA system user.
+    // Check admin/CVA via authorities BEFORE currentCompany() (admin users may
+    // have no company record and would otherwise be rejected by the lookup).
+    // Null/unauthenticated security context → 401 (never NPE).
+    private void assertCallerCanAccessOrder(Order order) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !authentication.isAuthenticated()) {
+            throw new AppException(ErrorCode.UNAUTHENTICATED);
+        }
+        boolean adminOrCva = authentication.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()) || "ROLE_CVA".equals(a.getAuthority()));
+        if (adminOrCva) {
+            return;
+        }
+        Company callerCompany = currentCompany(currentUser());
+        if (!order.getCompany().getId().equals(callerCompany.getId())) {
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+        }
+    }
+
+    @Transactional
+    @Override
+    public CreditTradeResponse createOrder(OrderRequest request) {
+        User user = currentUser();
+        // Lấy thông tin công ty người mua từ user hiện tại
+        // Lấy buyerCompany từ request hoặc context thay vì luôn là công ty của user hiện tại nếu cần
+        Company buyerCompany = currentCompany(user);
+
+        //1 find listing user want to buy
+        MarketPlaceListing listing = marketplaceListingRepository.findByIdWithDetails(request.getListingId())
+                .orElseThrow(() -> new ResourceNotFoundException("Marketplace listing not found"));
+
+        // 2 check conditional > 0
+        if (listing.getStatus() != com.carbonx.marketcarbon.common.ListingStatus.AVAILABLE) {
+            throw new AppException(ErrorCode.LISTING_IS_NOT_AVAILABLE);
+        }
+        if (request.getQuantity().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new AppException(ErrorCode.AMOUNT_IS_NOT_VALID);
+        }
+        // P0-B/B5: carbon credits are discrete 1-unit assets (unique serial each, integer
+        // issuance formula). Fractional quantities must be rejected at the earliest entry
+        // point — settlement assumes integers (intValueExact) and would otherwise fail late
+        // with a confusing error and a stuck order.
+        if (request.getQuantity().stripTrailingZeros().scale() > 0) {
+            throw new AppException(ErrorCode.QUANTITY_MUST_BE_WHOLE);
+        }
+        if (listing.getQuantity().compareTo(request.getQuantity()) < 0) {
+            throw new AppException(ErrorCode.AMOUNT_IS_NOT_ENOUGH);
+        }
+        // Kiểm tra xem người mua có đang cố mua listing của chính mình không
+        if (listing.getCompany().getId().equals(buyerCompany.getId())) {
+            throw new AppException(ErrorCode.SELLER_COMPANY_INVALID);
+        }
+
+        //3 sum of price order
+        BigDecimal unitPrice = listing.getPricePerCredit();
+        BigDecimal totalPrice = unitPrice.multiply(request.getQuantity());
+
+        Order order = Order.builder()
+                .company(buyerCompany)
+                .marketplaceListing(listing)
+                .carbonCredit(listing.getCarbonCredit())
+                .orderType(OrderType.BUY)
+                .orderStatus(OrderStatus.PENDING)
+                .quantity(request.getQuantity())
+                .unitPrice(unitPrice)
+                .totalPrice(totalPrice)
+                .platformFee(tradingFee)
+                .sellerPayout(totalPrice)
+                .createdAt(LocalDateTime.now(VIETNAM_ZONE))
+                .build();
+
+        Order saveOrder = orderRepository.save(order);
+        return CreditTradeResponse.builder()
+                .id(saveOrder.getId())
+                .companyId(saveOrder.getCompany().getId())
+                .status(saveOrder.getOrderStatus())
+                .totalAmount(saveOrder.getTotalPrice())
+                .creditAmount(saveOrder.getQuantity())
+                .createAt(saveOrder.getCreatedAt())
+                .build();
+    }
+
+    @Override
+    public CreditTradeResponse getOrderById(Long orderId) {
+        Order order = orderRepository.findById(orderId).orElseThrow(
+                () -> new ResourceNotFoundException("Order not found with id: " + orderId));
+
+        // P0-B/N7: only the buyer company, ADMIN, or CVA may read order details
+        assertCallerCanAccessOrder(order);
+
+        return CreditTradeResponse.builder()
+                .id(order.getId())
+                .companyId(order.getCompany().getId())
+                .status(order.getOrderStatus())
+                .totalAmount(order.getTotalPrice())
+                .createAt(order.getCreatedAt())
+                .creditAmount(order.getQuantity())
+                .build();
+    }
+
+    @Override
+    public List<CreditTradeResponse> getUserOrders() {
+        Company company = currentCompany(currentUser());
+        List<Order> orders = orderRepository.findByCompany(company);
+
+        return orders.stream()
+                .map(order -> CreditTradeResponse.builder()
+                        .id(order.getId())
+                        .companyId(company.getId())
+                        .status(order.getOrderStatus())
+                        .totalAmount(order.getTotalPrice())
+                        .creditAmount(order.getQuantity())
+                        .createAt(order.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public void cancelOrder(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with id: " + orderId));
+        User user = currentUser();
+        Company company = currentCompany(user);
+
+        // Chỉ công ty tạo đơn hàng mới có quyền hủy
+        if (!order.getCompany().getId().equals(company.getId())) {
+            throw new AppException(ErrorCode.UNAUTHORIZED);
+        }
+        if (order.getOrderStatus() != OrderStatus.PENDING) {
+            throw new AppException(ErrorCode.ORDER_IS_NOT_PENDING);
+        }
+
+        order.setOrderStatus(OrderStatus.CANCELLED);
+        orderRepository.save(order);
+    }
+
+    @Transactional
+    @Override
+    public void completeOrder(Long orderId) {
+        log.info("Starting order completion process for orderId: {}", orderId);
+
+        // B1 tìm order — P1.3: khóa bằng MỘT câu lệnh duy nhất (findById + LockMode).
+        // Biến thể fetch-join + @Lock bị Hibernate "follow-on locking": SELECT chạy KHÔNG
+        // khóa trước (cả 2 thread đều đọc PENDING), row bị khóa sau đó — hai settlement
+        // song song vẫn lọt (chứng minh bằng OrderSettlementConcurrencyIT trên MySQL thật).
+        Order order = orderRepository.findByIdWithPessimisticLock(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+
+        // P0-B/N7: only the buyer company or ADMIN may complete the order
+        assertCallerCanAccessOrder(order);
+
+        if (order.getOrderStatus() == OrderStatus.SUCCESS) {
+            log.info("Order already completed: {}", orderId);
+            return;
+        }
+
+        // B2 tìm list và khóa — dùng biến thể KHÔNG fetch-join để FOR UPDATE nằm ngay
+        // trong câu lệnh; graph (company/carbonCredit) nạp lazy trong tx sau khi đã khóa.
+        MarketPlaceListing listing = marketplaceListingRepository
+                .findByIdWithPessimisticLock(order.getMarketplaceListing().getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Listing not found"));
+
+        //B3 tìm công ty mua bán
+        Company buyerCompany = order.getCompany();
+        Company sellerCompany = listing.getCompany();
+        CarbonCredit sourceCredit = carbonCreditRepository
+                .findByIdWithPessimisticLock(listing.getCarbonCredit().getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Credit not found"));
+
+        BigDecimal quantityToBuy = order.getQuantity();
+        BigDecimal totalPrice = order.getTotalPrice();
+
+        if (listing.getQuantity().compareTo(quantityToBuy) < 0) {
+            // P0-B/B4: no status mutation here — this transaction is about to roll back,
+            // so any write would be discarded. The ERROR transition is persisted by
+            // OrderStatusRecorder (new transaction) from the controller's catch.
+            throw new AppException(ErrorCode.AMOUNT_IS_NOT_ENOUGH);
+        }
+
+        // B4 bắt đầu giao dịch
+        try {
+            // B4.1: Lấy ví — P1.3: load ID trước (projection, KHÔNG nạp state), rồi khóa ví
+            // bằng entityManager.find(PESSIMISTIC_WRITE) theo thứ tự ID tăng dần. Đây là lần
+            // CHẠM ĐẦU tới entity trong tx ⇒ đọc state MỚI NHẤT dưới khóa. Nếu nạp sẵn bằng
+            // findByCompanyIdWithDetails (không khóa) rồi mới khóa, persistence context giữ
+            // bản stale — 2 thread cùng ghi before=200 (lost-update, IT đã chứng minh).
+            Long buyerWalletId = walletRepository.findIdByCompanyId(buyerCompany.getId());
+            if (buyerWalletId == null) {
+                throw new ResourceNotFoundException("Buyer wallet not found");
+            }
+            Long sellerWalletId = walletRepository.findIdByCompanyId(sellerCompany.getId());
+            if (sellerWalletId == null) {
+                throw new ResourceNotFoundException("Seller wallet not found");
+            }
+            Long firstWalletId = Math.min(buyerWalletId, sellerWalletId);
+            Long secondWalletId = Math.max(buyerWalletId, sellerWalletId);
+            Wallet lockedFirst = entityManager.find(Wallet.class, firstWalletId,
+                    jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+            Wallet lockedSecond = entityManager.find(Wallet.class, secondWalletId,
+                    jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+            Wallet buyerWallet = buyerWalletId.equals(firstWalletId) ? lockedFirst : lockedSecond;
+            Wallet sellerWallet = sellerWalletId.equals(firstWalletId) ? lockedFirst : lockedSecond;
+            if (buyerWallet == null || sellerWallet == null) {
+                throw new ResourceNotFoundException("Wallet not found");
+            }
+
+            if (buyerWallet.getBalance().compareTo(totalPrice) < 0) {
+                // P0-B/B4: see note above — ERROR is recorded post-rollback by OrderStatusRecorder
+                throw new AppException(ErrorCode.WALLET_NOT_ENOUGH_MONEY);
+            }
+
+            // B4.2: Cập nhật sourceCredit (bên bán)
+            BigDecimal currentListedAmount = sourceCredit.getListedAmount() != null
+                    ? sourceCredit.getListedAmount()
+                    : BigDecimal.ZERO;
+            BigDecimal updatedListedAmount = currentListedAmount.subtract(quantityToBuy);
+            if (updatedListedAmount.compareTo(BigDecimal.ZERO) < 0) {
+                updatedListedAmount = BigDecimal.ZERO;
+            }
+
+            // số tín chỉ carbon đang tồn tại
+            BigDecimal directAvailable = sourceCredit.getCarbonCredit() != null
+                    ? sourceCredit.getCarbonCredit()
+                    : BigDecimal.ZERO;
+
+            // số tín chỉ carbon sau khi bán
+            BigDecimal totalAfterSale = directAvailable.add(updatedListedAmount);
+
+            sourceCredit.setListedAmount(updatedListedAmount);
+            sourceCredit.setAmount(totalAfterSale);
+            sourceCredit.setCarbonCredit(directAvailable);
+
+            if (totalAfterSale.compareTo(BigDecimal.ZERO) <= 0) {
+                sourceCredit.setStatus(CreditStatus.TRADED);
+            }
+            carbonCreditRepository.save(sourceCredit);
+
+            // B4.3: Tạo tín chỉ mới cho người mua
+            String issuedBy = Optional.ofNullable(SecurityContextHolder.getContext().getAuthentication())
+                    .map(Authentication::getName)
+                    .orElse(buyerCompany.getUser() != null
+                            ? buyerCompany.getUser().getEmail()
+                            : "system@carbon.com");
+            //  Giữ nguyên issueTradeCredit(), tính dựa trên quantity
+            creditIssuanceService.issueTradeCredit(
+                    sourceCredit,
+                    buyerCompany,
+                    quantityToBuy,
+                    listing.getPricePerCredit(),
+                    issuedBy
+            );
+
+            // Số credits thực tế = quantity — P0-B/B5: intValueExact() fails loudly if a
+            // fractional quantity ever reaches settlement (defense in depth behind the
+            // creation-time validation) instead of silently truncating paid quantity.
+            int actualCreditsCreated = quantityToBuy.intValueExact();
+
+            // B5.1: Cập nhật số dư tín chỉ trong ví
+            BigDecimal currentBuyerCredit = buyerWallet.getCarbonCreditBalance() != null
+                    ? buyerWallet.getCarbonCreditBalance()
+                    : BigDecimal.ZERO;
+
+            // Cộng đúng số lượng credits đã tạo (dưới dạng BigDecimal)
+            buyerWallet.setCarbonCreditBalance(
+                    currentBuyerCredit.add(BigDecimal.valueOf(actualCreditsCreated))
+            );
+            walletRepository.save(buyerWallet);
+
+            // Trừ từ ví seller
+            BigDecimal currentSellerCredit = sellerWallet.getCarbonCreditBalance() != null
+                    ? sellerWallet.getCarbonCreditBalance()
+                    : BigDecimal.ZERO;
+            sellerWallet.setCarbonCreditBalance(
+                    currentSellerCredit.subtract(quantityToBuy).max(BigDecimal.ZERO)
+            );
+            walletRepository.save(sellerWallet);
+
+            // B5.2: Cập nhật listing
+            listing.setQuantity(listing.getQuantity().subtract(quantityToBuy));
+            BigDecimal currentSold = listing.getSoldQuantity() != null
+                    ? listing.getSoldQuantity()
+                    : BigDecimal.ZERO;
+            listing.setSoldQuantity(currentSold.add(quantityToBuy));
+
+            if (listing.getQuantity().compareTo(BigDecimal.ZERO) <= 0) {
+                listing.setStatus(ListingStatus.SOLD);
+            }
+            marketplaceListingRepository.save(listing);
+
+            // B6: Đánh dấu order thành công
+            order.setOrderStatus(OrderStatus.SUCCESS);
+            order.setCompletedAt(LocalDateTime.now(VIETNAM_ZONE));
+            orderRepository.save(order);
+
+            // B7: Xử lý giao dịch tài chính
+            processFinancialTransactions(order, buyerWallet, sellerWallet, totalPrice,
+                    quantityToBuy, listing, sellerCompany, buyerCompany);
+
+            log.info("Order {} completed. Buyer: {}, Seller: {}, Credits created: {}, Price: {}",
+                    orderId, buyerCompany.getId(), sellerCompany.getId(),
+                    actualCreditsCreated, totalPrice);
+
+        } catch (Exception e) {
+            // P0-B/B4: do NOT write status here — this transaction is rolling back, so the
+            // save below would be discarded (the pre-B4 bug: orders stayed PENDING forever).
+            // The ERROR transition is persisted by OrderStatusRecorder after this method's
+            // transaction has fully rolled back (see OrderController.completeOrder).
+            log.error("Error completing order: {}", orderId, e);
+            throw e;
+        }
+    }
+
+    // xử lý giao dịch tài chính
+    private void processFinancialTransactions(Order order, Wallet buyerWallet, Wallet sellerWallet,
+                                              BigDecimal totalPrice, BigDecimal quantity,
+                                              MarketPlaceListing listing, Company sellerCompany,
+                                              Company buyerCompany) {
+        try {
+            // Giao dịch trừ tiền người mua
+            WalletTransactionRequest buyerTxn = WalletTransactionRequest.builder()
+                    .wallet(buyerWallet)
+                    .order(order)
+                    .type(WalletTransactionType.BUY_CARBON_CREDIT)
+                    .description("Mua " + quantity + " tín chỉ từ tin đăng #" + listing.getId() +
+                            " (Bên bán: " + sellerCompany.getCompanyName() + ")")
+                    .amount(totalPrice)
+                    .build();
+
+            walletTransactionService.createTransaction(buyerTxn);
+
+            // Hạch toán phí sàn giao dịch (mặc định 5% theo BusinessFlowV2) về ví Admin
+            BigDecimal feeRate = order.getPlatformFee() != null ? order.getPlatformFee() : BigDecimal.ZERO;
+            BigDecimal feeAmount = BigDecimal.ZERO;
+            Wallet adminWallet = null;
+
+            if (feeRate.compareTo(BigDecimal.ZERO) > 0 && adminRepository != null) {
+                var firstAdmin = adminRepository.findAll().stream().findFirst();
+                if (firstAdmin.isPresent() && firstAdmin.get().getUser() != null) {
+                    adminWallet = walletRepository.findByUserId(firstAdmin.get().getUser().getId());
+                }
+            }
+
+            if (adminWallet != null && feeRate.compareTo(BigDecimal.ZERO) > 0) {
+                feeAmount = totalPrice.multiply(feeRate).setScale(2, java.math.RoundingMode.HALF_UP);
+            }
+            BigDecimal sellerNet = totalPrice.subtract(feeAmount);
+            order.setSellerPayout(sellerNet);
+            orderRepository.save(order);
+
+            // Giao dịch cộng tiền thực nhận cho người bán (sau trừ phí sàn)
+            WalletTransactionRequest sellerTxn = WalletTransactionRequest.builder()
+                    .wallet(sellerWallet)
+                    .order(order)
+                    .type(WalletTransactionType.SELL_CARBON_CREDIT)
+                    .description("Bán " + quantity + " tín chỉ từ tin đăng #" + listing.getId() +
+                            " (Bên mua: " + buyerCompany.getCompanyName() + ")")
+                    .amount(sellerNet)
+                    .build();
+
+            walletTransactionService.createTransaction(sellerTxn);
+
+            // Giao dịch cộng phí sàn 5% vào ví Admin
+            if (adminWallet != null && feeAmount.compareTo(BigDecimal.ZERO) > 0) {
+                WalletTransactionRequest feeTxn = WalletTransactionRequest.builder()
+                        .wallet(adminWallet)
+                        .order(order)
+                        .type(WalletTransactionType.ADD_MONEY)
+                        .description("Phí sàn giao dịch (5%) từ đơn hàng #" + order.getId())
+                        .amount(feeAmount)
+                        .build();
+                walletTransactionService.createTransaction(feeTxn);
+            }
+
+        } catch (Exception e) {
+            log.error("Error processing financial transactions for order: {}", order.getId(), e);
+            throw new AppException(ErrorCode.TRANSACTION_PROCESSING_ERROR);
+        }
+    }
+
+}

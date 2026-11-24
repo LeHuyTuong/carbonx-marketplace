@@ -1,0 +1,206 @@
+package com.carbonx.marketcarbon.exception;
+
+import com.carbonx.marketcarbon.utils.CommonResponse;
+import com.carbonx.marketcarbon.utils.common.ApiResponse;
+import jakarta.validation.ConstraintDefinitionException;
+import jakarta.validation.ConstraintViolationException;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ControllerAdvice;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+
+import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@ControllerAdvice
+@Slf4j
+public class GlobalExceptionHandler {
+
+    private CommonResponse<Object> buildErrorResponse(String code, String message) {
+        return CommonResponse.<Object>builder()
+                .requestTrace(UUID.randomUUID().toString())
+                .responseDateTime(OffsetDateTime.now())
+                .responseStatus(CommonResponse.ResponseStatus.builder()
+                        .responseCode(code)
+                        .responseMessage(message)
+                        .build())
+                .responseData(null)
+                .build();
+    }
+
+    // 400 - Bad Request (custom)
+    @ExceptionHandler(BadRequestException.class)
+    public ResponseEntity<CommonResponse<Object>> handleBadRequest(BadRequestException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(buildErrorResponse("400", ex.getMessage()));
+    }
+
+    // 401 - Unauthorized (custom)
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<CommonResponse<Object>> handleUnauthorized(UnauthorizedException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(buildErrorResponse("401", ex.getMessage()));
+    }
+
+    // 403 - Forbidden (Spring Security)
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<CommonResponse<Object>> handleAccessDenied(AccessDeniedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(buildErrorResponse("403", "This role is Forbidden for this feature"));
+    }
+
+    // 404 - Not Found (custom)
+    @ExceptionHandler(NotFoundException.class)
+    public ResponseEntity<CommonResponse<Object>> handleNotFound(NotFoundException ex) {
+        // P2: generic message — raw ex.getMessage() may leak internal IDs/details.
+        log.error("Not found", ex);
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(buildErrorResponse("404", "Resource not found"));
+    }
+
+    // AppException -> dùng ErrorCode trong dự án
+    @ExceptionHandler(AppException.class)
+    public ResponseEntity<CommonResponse<Object>> handleAppException(AppException ex) {
+        var ec = ex.getErrorCode();
+        return ResponseEntity.status(ec.getStatusCode())
+                .body(buildErrorResponse(String.valueOf(ec.getCode()), ec.getMessage()));
+    }
+
+    // 400 - Validation (DTO @Valid)
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<CommonResponse<Object>> handleValidation(MethodArgumentNotValidException ex) {
+        String msg = ex.getBindingResult().getFieldErrors().isEmpty()
+                ? "Validation error"
+                : ex.getBindingResult().getFieldErrors().stream()
+                .map(e -> e.getField() + ": " + e.getDefaultMessage())
+                .collect(Collectors.joining("; "));
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(buildErrorResponse("400", msg));
+    }
+
+    // 400 - Constraint (@Validated trên params)
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<CommonResponse<Object>> handleConstraint(ConstraintViolationException ex) {
+        String msg = ex.getConstraintViolations().stream()
+                .map(v -> v.getPropertyPath() + ": " + v.getMessage())
+                .collect(Collectors.joining("; "));
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(buildErrorResponse("400", msg.isEmpty() ? "Constraint violation" : msg));
+    }
+
+    // 400 - Sai kiểu tham số
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<CommonResponse<Object>> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        String msg = "Parameter '" + ex.getName() + "' must be of type " +
+                (ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "expected type");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(buildErrorResponse("400", msg));
+    }
+
+    // 400 - JSON lỗi
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<CommonResponse<Object>> handleNotReadable(HttpMessageNotReadableException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(buildErrorResponse("400", "Malformed JSON request"));
+    }
+
+    // 500 - Fallback
+    // P0-A (SC5): never return raw exception messages to clients — they can leak SQL,
+    // class names, file paths or infrastructure details. Full detail stays in the server log.
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<CommonResponse<Object>> handleOther(Exception ex) {
+        log.error("Unhandled error", ex);
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(buildErrorResponse("500", "An unexpected error occurred. Please try again later."));
+    }
+
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<CommonResponse<Object>> handleHandlerMethodValidationException(HandlerMethodValidationException ex) {
+        log.error("Validation error at handler method: {}", ex.getMessage());
+
+        // Trích xuất chi tiết lỗi validation từ HandlerMethodValidationException
+        String detailedMessage = ex.getAllValidationResults().stream()
+                .flatMap(result -> result.getResolvableErrors().stream())
+                .map(error -> {
+                    // Cố gắng lấy thông tin FieldError để có tên trường và message cụ thể
+                    if (error instanceof FieldError fieldError) {
+                        // Loại bỏ tiền tố không cần thiết (thường là tên parameter + "data.")
+                        String fieldName = fieldError.getField();
+                        if (fieldName.contains(".")) {
+                            fieldName = fieldName.substring(fieldName.lastIndexOf('.') + 1);
+                        }
+                        return fieldName + ": " + fieldError.getDefaultMessage();
+                    }
+                    // Nếu không phải FieldError, lấy message mặc định
+                    return error.getDefaultMessage();
+                })
+                .collect(Collectors.joining("; "));
+
+        // Fallback nếu không trích xuất được message chi tiết
+        if (detailedMessage.isBlank()) {
+            detailedMessage = "Validation failure";
+        }
+
+        // Sử dụng hàm buildErrorResponse hiện có của bạn
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(buildErrorResponse(String.valueOf(HttpStatus.BAD_REQUEST.value()), detailedMessage));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<CommonResponse<Object>> DataIntegrityViolationException(Exception ex) {
+        // P2: never return raw DB/constraint messages — they leak schema details.
+        log.error("Unhandled error", ex);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(buildErrorResponse("400", "Unable to process request. Please try again later."));
+    }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<CommonResponse<Object>> ResourceNotFoundException(Exception ex) {
+        log.error("Unhandled error", ex);
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(buildErrorResponse("404", "Resource not found"));
+    }
+
+    @ExceptionHandler(BadCredentialsException.class)
+    public ResponseEntity<CommonResponse<Object>> BadCredentialsException(Exception ex) {
+        log.error("Unhandled error", ex);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(buildErrorResponse("400", "Invalid credentials"));
+    }
+
+    @ExceptionHandler(ConstraintDefinitionException.class)
+    public ResponseEntity<CommonResponse<Object>> ConstraintDefinitionException(Exception ex) {
+        log.error("Unhandled error", ex);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(buildErrorResponse("400", "Invalid request configuration"));
+    }
+
+    @ExceptionHandler(CsvBatchException.class)
+    public ResponseEntity<?> handleCsvBatchException(CsvBatchException ex) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("total", ex.getErrors().size());
+        response.put("success", 0);
+        response.put("failed", ex.getErrors().size());
+        response.put("results", ex.getErrors());
+        Map<String, Object> body = Map.of(
+                "requestTrace", UUID.randomUUID().toString(),
+                "responseStatus", Map.of("responseCode", "400", "responseMessage", "Failed"),
+                "response", response
+        );
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
+
+}

@@ -1,0 +1,682 @@
+package com.carbonx.marketcarbon.service.impl;
+
+import com.carbonx.marketcarbon.common.CreditStatus;
+import com.carbonx.marketcarbon.common.ListingStatus;
+import com.carbonx.marketcarbon.common.security.CurrentUserService;
+import com.carbonx.marketcarbon.dto.request.CreditListingRequest;
+import com.carbonx.marketcarbon.dto.request.CreditListingUpdateRequest;
+import com.carbonx.marketcarbon.dto.response.MarketplaceListingResponse;
+import com.carbonx.marketcarbon.exception.AppException;
+import com.carbonx.marketcarbon.exception.ErrorCode;
+import com.carbonx.marketcarbon.exception.ResourceNotFoundException;
+import com.carbonx.marketcarbon.model.*;
+import com.carbonx.marketcarbon.repository.*;
+import com.carbonx.marketcarbon.service.MarketplaceService;
+import org.springframework.transaction.annotation.Transactional;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class MarketplaceServiceImpl implements MarketplaceService {
+
+    private final CarbonCreditRepository carbonCreditRepository;
+    private final CompanyRepository companyRepository;
+    private final UserRepository userRepository;
+    private final MarketplaceListingRepository marketplaceListingRepository;
+    private final CreditBatchRepository creditBatchRepository;
+
+    /**
+     * Optional collaborator: production Spring wiring injects it, while legacy unit tests
+     * that call the generated constructor directly keep the repository-based fallback.
+     */
+    private CurrentUserService currentUserService;
+
+    @Autowired(required = false)
+    public void setCurrentUserService(CurrentUserService currentUserService) {
+        this.currentUserService = currentUserService;
+    }
+
+    private static final ZoneId VIETNAM_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
+
+    private User currentUser() {
+        if (currentUserService != null) {
+            return currentUserService.getCurrentUser();
+        }
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String email = authentication.getName();
+        User user = userRepository.findByEmail(email);
+        if (user == null) {
+            throw new RuntimeException("User not found with email " + email);
+        }
+        return user;
+    }
+
+    private Company currentCompany(User user) {
+        if (currentUserService != null) {
+            return currentUserService.getCurrentCompany();
+        }
+        return companyRepository.findByUserId(user.getId())
+                .orElseThrow(() -> new AppException(ErrorCode.COMPANY_NOT_FOUND));
+    }
+
+    @Override
+    @Transactional
+    public MarketplaceListingResponse listCreditsForSale(CreditListingRequest request) {
+        log.info("Listing credits for sale: quantity={}, price={}",
+                request.getQuantity(), request.getPricePerCredit());
+
+        User currentUser = currentUser();
+        Company sellerCompany = currentCompany(currentUser);
+
+        // B1: Kiểm tra đầu vào
+        if (request.getQuantity() == null || request.getQuantity().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new AppException(ErrorCode.AMOUNT_IS_NOT_VALID);
+        }
+        // P0-B/B5: credits are discrete units — listings must be whole-number quantities too
+        if (request.getQuantity().stripTrailingZeros().scale() > 0) {
+            throw new AppException(ErrorCode.QUANTITY_MUST_BE_WHOLE);
+        }
+
+        // B2 Nếu request có carbonCreditId nhưng ko có batchId
+        if (request.getCarbonCreditId() != null && request.getBatchId() == null) {
+            log.info("[AUTO-BATCH] Checking if carbonCreditId={} needs batch grouping for quantity={}",
+                    request.getCarbonCreditId(), request.getQuantity());
+
+            // Bước 1: Tìm credit được chỉ định
+            CarbonCredit targetCredit = carbonCreditRepository
+                    .findByIdAndCompanyId(request.getCarbonCreditId(), sellerCompany.getId())
+                    .orElse(null);
+
+            if (targetCredit != null) {
+                // Bước 2: Tính available của credit này
+                BigDecimal singleCreditAvailable = getAvailableCreditAmount(targetCredit);
+
+                log.debug("[AUTO-BATCH] Credit {} has available={}, requested={}",
+                        targetCredit.getId(), singleCreditAvailable, request.getQuantity());
+
+                // Bước 3: Kiểm tra xem credit có thuộc batch không
+                CreditBatch batch = targetCredit.getBatch();
+
+                // Bước 4: nếu credit đơn lẻ ko đủ amount và thuộc về một batch
+                if (singleCreditAvailable.compareTo(request.getQuantity()) < 0 && batch != null) {
+                    log.info("[AUTO-BATCH] Credit {} insufficient (available={} < requested={}). " +
+                                    "Checking batch {}...",
+                            targetCredit.getId(), singleCreditAvailable,
+                            request.getQuantity(), batch.getId());
+
+                    // Bước 4.1: Tính tổng available của toàn bộ batch
+                    // 2.1  Lọc lấy các credit còn khả dụng và thuộc sở hữu của công ty
+                    List<CarbonCredit> batchCredits = batch.getCarbonCredit().stream()
+                            .filter(c ->
+                                    (c.getStatus() == CreditStatus.AVAILABLE || c.getStatus() == CreditStatus.TRADED)
+                            )
+                            .filter(c -> c.getCompany().getId().equals(sellerCompany.getId()))
+                            .filter(c -> availableOf(c).compareTo(BigDecimal.ZERO) > 0)
+                            .toList();
+
+                    BigDecimal totalBatchAvailable = batchCredits.stream()
+                            .map(this::availableOf)
+                            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                    log.info("[AUTO-BATCH] Batch {} has {} credits with total available={}",
+                            batch.getId(), batchCredits.size(), totalBatchAvailable);
+
+                    // Bước 4.2: nếu  batch đủ số lượng chuyển sang list theo batch
+                    if (totalBatchAvailable.compareTo(request.getQuantity()) >= 0) {
+                        log.info("[AUTO-BATCH] Batch {} has enough credits. " +
+                                        "Redirecting request from carbonCreditId={} to batchId={}",
+                                batch.getId(), request.getCarbonCreditId(), batch.getId());
+
+                        //  Sửa request để dùng logic batch
+                        request.setBatchId(batch.getId());
+                        request.setCarbonCreditId(null); // Clear carbonCreditId
+
+                        log.info("[AUTO-BATCH] Request updated: batchId={}, carbonCreditId=null",
+                                request.getBatchId());
+                    } else {
+                        // Batch cũng không đủ thì báo lỗi
+                        log.warn("[AUTO-BATCH] Batch {} also insufficient " +
+                                        "(total={} < requested={}). Will fail with AMOUNT_IS_NOT_ENOUGH",
+                                batch.getId(), totalBatchAvailable, request.getQuantity());
+                    }
+                } else if (singleCreditAvailable.compareTo(request.getQuantity()) >= 0) {
+                    // Credit đơn lẻ đủ số lượng
+                    log.info("[AUTO-BATCH] Credit {} has enough available={}. Using single-credit mode.",
+                            targetCredit.getId(), singleCreditAvailable);
+                } else if (batch == null) {
+                    // Credit không thuộc batch nào thì không thể nộp
+                    log.warn("[AUTO-BATCH] Credit {} has no batch. Cannot group credits.",
+                            targetCredit.getId());
+                }
+            } else {
+                log.warn("[AUTO-BATCH] Credit {} not found or not owned by company {}",
+                        request.getCarbonCreditId(), sellerCompany.getId());
+            }
+        }
+
+        // B2: Nếu request có batchId
+        if (request.getBatchId() != null) {
+            log.info("[BATCH-MODE] Processing batch listing - batchId={}", request.getBatchId());
+
+            CreditBatch batch = creditBatchRepository.findById(request.getBatchId())
+                    .orElseThrow(() -> new AppException(ErrorCode.CREDIT_BATCH_NOT_FOUND));
+
+            // 2.1 Lấy các credit còn AVAILABLE và còn available > 0
+            List<CarbonCredit> credits = batch.getCarbonCredit().stream()
+                    .filter(c ->
+                            (c.getStatus() == CreditStatus.AVAILABLE || c.getStatus() == CreditStatus.TRADED)
+                    )
+                    .filter(c -> c.getCompany().getId().equals(sellerCompany.getId()))
+                    .filter(c -> availableOf(c).compareTo(BigDecimal.ZERO) > 0)
+                    .toList();
+
+            if (credits.isEmpty()) {
+                throw new AppException(ErrorCode.AMOUNT_IS_NOT_ENOUGH);
+            }
+
+            // 2.2 Check tổng available trong batch có đủ không
+            BigDecimal totalAvailable = credits.stream()
+                    .map(this::availableOf)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            log.info("[BATCH-MODE] Batch {} has {} available credits, total quantity={}",
+                    batch.getId(), credits.size(), totalAvailable);
+
+            if (totalAvailable.compareTo(request.getQuantity()) < 0) {
+                throw new AppException(ErrorCode.AMOUNT_IS_NOT_ENOUGH);
+            }
+
+            // 2.3 Trừ dần available trên từng credit, đồng thời cộng vào listedAmount
+            BigDecimal remaining = request.getQuantity();
+
+            for (CarbonCredit c : credits) {
+                if (remaining.compareTo(BigDecimal.ZERO) <= 0) break;
+
+                BigDecimal availBefore = availableOf(c);
+                if (availBefore.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+                BigDecimal deduct = availBefore.min(remaining);
+
+                // update listed
+                BigDecimal listed = safe(c.getListedAmount());
+                BigDecimal availAfter = availBefore.subtract(deduct);
+                c.setListedAmount(listed.add(deduct));
+
+                // quy ước: carbonCredit = availableQuantity
+                c.setCarbonCredit(availAfter);
+
+                // giữ total nhất quán: amount = available + listed
+                c.setAmount(availAfter.add(c.getListedAmount()));
+
+                // P1.1: dùng chung updateCreditStatus với single-credit path — trước đây
+                // batch-mode chỉ set LISTED khi available về đúng 0, nên credit bị list
+                // MỘT PHẦN vẫn giữ AVAILABLE => cùng trạng thái business mà 2 path cho
+                // 2 status khác nhau.
+                updateCreditStatus(c, availAfter, c.getListedAmount());
+
+                log.debug("[BATCH-MODE] Updated credit {} - deduct={}, availBefore={}, availAfter={}, listed={}",
+                        c.getId(), deduct, availBefore, availAfter, c.getListedAmount());
+
+                remaining = remaining.subtract(deduct);
+            }
+
+            carbonCreditRepository.saveAll(credits);
+
+            log.info("[BATCH-MODE] Successfully distributed quantity={} across {} credits",
+                    request.getQuantity(), credits.size());
+
+            // 2.4 Nếu đã có listing cho batch này, cập nhật thay vì tạo mới
+            List<MarketPlaceListing> existingBatchListings = marketplaceListingRepository
+                    .findByCompanyIdAndCarbonCredit_Batch_IdAndStatus(
+                            sellerCompany.getId(),
+                            batch.getId(),
+                            ListingStatus.AVAILABLE);
+
+            if (!existingBatchListings.isEmpty()) {
+                MarketPlaceListing existingListing = existingBatchListings.get(0);
+
+                BigDecimal updatedQuantity = safe(existingListing.getQuantity()).add(request.getQuantity());
+                BigDecimal updatedOriginalQuantity = safe(existingListing.getOriginalQuantity()).add(request.getQuantity());
+
+                existingListing.setQuantity(updatedQuantity);
+                existingListing.setOriginalQuantity(updatedOriginalQuantity);
+                existingListing.setPricePerCredit(request.getPricePerCredit());
+                existingListing.setStatus(ListingStatus.AVAILABLE);
+
+                MarketPlaceListing updatedListing = marketplaceListingRepository.save(existingListing);
+                log.info("Updated existing batch listing ID: {} with additional quantity: {}",
+                        updatedListing.getId(), request.getQuantity());
+
+                return buildListingResponse(updatedListing);
+            }
+
+            // 2.5 Tạo listing tổng theo số lượng yêu cầu (không đếm số record)
+            MarketPlaceListing listing = MarketPlaceListing.builder()
+                    .company(sellerCompany)
+                    .carbonCredit(credits.get(0)) // link đại diện theo schema hiện tại
+                    .quantity(request.getQuantity())
+                    .pricePerCredit(request.getPricePerCredit())
+                    .originalQuantity(request.getQuantity())
+                    .soldQuantity(BigDecimal.ZERO)
+                    .status(ListingStatus.AVAILABLE)
+                    .createdAt(LocalDateTime.now(VIETNAM_ZONE))
+                    .expiresAt(batch.getExpiresAt())
+                    .build();
+
+            MarketPlaceListing saved = marketplaceListingRepository.save(listing);
+            log.info("Listed {} credits across {} CarbonCredit rows in batch {}",
+                    request.getQuantity(), credits.size(), batch.getBatchCode());
+            return buildListingResponse(saved);
+        }
+
+        // B3: Logic xử lý single credit
+        log.info("[SINGLE-MODE] Processing single credit listing - carbonCreditId={}",
+                request.getCarbonCreditId());
+
+        CarbonCredit creditToSell = resolveOwnedCredit(
+                request.getCarbonCreditId(), sellerCompany, request.getQuantity());
+
+        BigDecimal availableQuantity = getAvailableCreditAmount(creditToSell);
+
+        if (availableQuantity.compareTo(request.getQuantity()) < 0) {
+            throw new AppException(ErrorCode.AMOUNT_IS_NOT_ENOUGH);
+        }
+
+        // 4.2 Kiểm tra xem đã có listing nào hiện có cho cùng loại tín chỉ carbon chưa
+        List<MarketPlaceListing> existingListings = marketplaceListingRepository
+                .findByCompanyIdAndCarbonCreditIdAndStatus(
+                        sellerCompany.getId(),
+                        creditToSell.getId(),
+                        ListingStatus.AVAILABLE);
+
+        // B5 Nếu tìm thấy listing hiện có, cập nhật nó thay vì tạo mới
+        if (!existingListings.isEmpty()) {
+            MarketPlaceListing existingListing = existingListings.get(0);
+            log.info("Found existing listing ID: {}. Merging new request with existing listing.",
+                    existingListing.getId());
+
+            // B5.1 Cập nhật số lượng tín chỉ niêm yết và số lượng còn lại
+            BigDecimal currentListedAmount = creditToSell.getListedAmount() != null
+                    ? creditToSell.getListedAmount()
+                    : BigDecimal.ZERO;
+
+            BigDecimal updatedAvailableQuantity = availableQuantity.subtract(request.getQuantity());
+            if (updatedAvailableQuantity.compareTo(BigDecimal.ZERO) < 0) {
+                throw new AppException(ErrorCode.AMOUNT_IS_NOT_ENOUGH);
+            }
+
+            // B5.2 Cập nhập số lượng tín chỉ thêm mới
+            BigDecimal updatedListedAmount = currentListedAmount.add(request.getQuantity());
+            creditToSell.setCarbonCredit(updatedAvailableQuantity);
+            creditToSell.setListedAmount(updatedListedAmount);
+
+            // 5.3 cập nhập tổng số tín chỉ
+            BigDecimal recalculatedTotal = updatedAvailableQuantity.add(updatedListedAmount);
+            creditToSell.setAmount(recalculatedTotal);
+
+            carbonCreditRepository.save(creditToSell);
+
+            //B5.4 Cập nhật listing hiện có thay vì tạo mới
+            BigDecimal newQuantity = existingListing.getQuantity().add(request.getQuantity());
+            BigDecimal newOriginalQuantity = existingListing.getOriginalQuantity().add(request.getQuantity());
+
+            // Cập nhật số lượng
+            existingListing.setQuantity(newQuantity);
+            existingListing.setOriginalQuantity(newOriginalQuantity);
+
+            // Cập nhật giá nếu có request thay đổi
+            existingListing.setPricePerCredit(request.getPricePerCredit());
+            existingListing.setStatus(ListingStatus.AVAILABLE);
+
+            MarketPlaceListing updatedListing = marketplaceListingRepository.save(existingListing);
+            log.info("Updated existing listing ID: {} with additional quantity: {}",
+                    updatedListing.getId(), request.getQuantity());
+
+            return buildListingResponse(updatedListing);
+
+        }
+
+        // Nếu không tìm thấy listing hiện có, tạo mới
+        // B6 : Cập nhật số lượng tín chỉ niêm yết và số lượng còn lại
+        BigDecimal currentListedAmount = creditToSell.getListedAmount() != null
+                ? creditToSell.getListedAmount()
+                : BigDecimal.ZERO;
+
+        BigDecimal updatedAvailableQuantity = availableQuantity.subtract(request.getQuantity());
+
+        if (updatedAvailableQuantity.compareTo(BigDecimal.ZERO) < 0) {
+            throw new AppException(ErrorCode.AMOUNT_IS_NOT_ENOUGH);
+        }
+
+        BigDecimal updatedListedAmount = currentListedAmount.add(request.getQuantity());
+        creditToSell.setCarbonCredit(updatedAvailableQuantity);
+        creditToSell.setListedAmount(updatedListedAmount);
+
+        BigDecimal recalculatedTotal = updatedAvailableQuantity.add(updatedListedAmount);
+        creditToSell.setAmount(recalculatedTotal);
+        creditToSell.setStatus(CreditStatus.LISTED);
+
+        carbonCreditRepository.save(creditToSell);
+
+        // B7: Tạo mới một listing trên sàn giao dịch
+        MarketPlaceListing newListing = MarketPlaceListing.builder()
+                .company(sellerCompany)
+                .carbonCredit(creditToSell)
+                .quantity(request.getQuantity())
+                .pricePerCredit(request.getPricePerCredit())
+                .originalQuantity(request.getQuantity())
+                .soldQuantity(BigDecimal.ZERO)
+                .status(ListingStatus.AVAILABLE)
+                .createdAt(LocalDateTime.now(VIETNAM_ZONE))
+                .expiresAt(creditToSell.getExpiryDate())
+                .build();
+
+        MarketPlaceListing savedListing = marketplaceListingRepository.save(newListing);
+        log.info("Created new listing ID: {}", savedListing.getId());
+
+        return buildListingResponse(savedListing);
+
+    }
+
+    private BigDecimal safe(BigDecimal v) {
+        return v == null ? BigDecimal.ZERO : v;
+    }
+
+    /**
+     * availableOf ưu tiên field carbonCredit (được dùng như availableQuantity).
+     * Nếu carbonCredit không có giá trị dương, fallback = amount - listedAmount.
+     */
+    private BigDecimal availableOf(CarbonCredit c) {
+        BigDecimal direct = safe(c.getCarbonCredit());
+        if (direct.compareTo(BigDecimal.ZERO) > 0) return direct;
+
+        return safe(c.getAmount())
+                .subtract(safe(c.getListedAmount()))
+                .max(BigDecimal.ZERO);
+    }
+
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MarketplaceListingResponse> getActiveListing() {
+        List<MarketPlaceListing> activeListings = marketplaceListingRepository.findByStatusAndExpiresAtAfterWithDetails(ListingStatus.AVAILABLE, LocalDate.now());
+
+        return activeListings.stream()
+                .map(this::buildListingResponse)
+                .collect(Collectors.toList());
+    }
+
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MarketplaceListingResponse> getALlCreditListingsByCompanyID() {
+
+        User currentUser = currentUser();
+        Company sellerCompany = currentCompany(currentUser);
+
+        List<MarketPlaceListing> companyListings = marketplaceListingRepository.findByCompanyIdWithDetails(sellerCompany.getId());
+
+        return companyListings.stream()
+                .map(this::buildListingResponse)
+                .collect(Collectors.toList());
+    }
+
+
+    @Override
+    @Transactional
+    public MarketplaceListingResponse updateListCredits(CreditListingUpdateRequest request) {
+        //B1 check đầu vào
+        if (request == null) {
+            throw new AppException(ErrorCode.LISTING_IS_NOT_AVAILABLE);
+        }
+
+        // B2 lấy ID và giá từ request
+        Long listingId = request.getListingId();
+        BigDecimal pricePerCredit = request.getPricePerCredit();
+
+        if (listingId == null) {
+            throw new AppException(ErrorCode.LISTING_IS_NOT_AVAILABLE);
+        }
+        if (pricePerCredit == null || pricePerCredit.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new AppException(ErrorCode.AMOUNT_IS_NOT_VALID);
+        }
+
+        User currentUser = currentUser();
+        Company sellerCompany = currentCompany(currentUser);
+
+        MarketPlaceListing listing = marketplaceListingRepository.findById(listingId)
+                .orElseThrow(() -> new AppException(ErrorCode.LISTING_IS_NOT_AVAILABLE));
+
+        if (!Objects.equals(listing.getCompany().getId(), sellerCompany.getId())) {
+            throw new AppException(ErrorCode.COMPANY_NOT_OWN);
+        }
+        if (listing.getStatus() != ListingStatus.AVAILABLE) {
+            throw new AppException(ErrorCode.LISTING_IS_NOT_AVAILABLE);
+        }
+
+        listing.setPricePerCredit(pricePerCredit);
+        MarketPlaceListing savedListing = marketplaceListingRepository.save(listing);
+
+        return buildListingResponse(savedListing);
+    }
+
+    /**
+     * 1. Tìm Listing, xác thực chủ sở hữu và trạng thái AVAILABLE.
+     * 2. Lấy CarbonCredit liên quan và khóa nó lại.
+     * 3. Lấy số lượng quantityToRestore từ listing (số lượng còn lại).
+     * 4. Hoàn trả số lượng này cho CarbonCredit:
+     * - credit.listedAmount -= quantityToRestore
+     * - credit.carbonCredit (available) += quantityToRestore
+     * - credit.amount (total) = listedAmount + carbonCredit
+     * 5. Update lại trạng thái (status) của CarbonCredit.
+     * 6. Lưu CarbonCredit.
+     * 7. Xóa MarketPlaceListing.
+     */
+    @Override
+    @Transactional
+    public MarketplaceListingResponse deleteListCredits(Long creditListingId) {
+        if (creditListingId == null) {
+            throw new AppException(ErrorCode.LISTING_IS_NOT_AVAILABLE);
+        }
+
+        User currentUser = currentUser();
+        Company sellerCompany = currentCompany(currentUser);
+
+        // 1. Tìm Listing, xác thực
+        MarketPlaceListing listing = marketplaceListingRepository.findById(creditListingId)
+                .orElseThrow(() -> new AppException(ErrorCode.LISTING_IS_NOT_AVAILABLE));
+
+        if (!Objects.equals(listing.getCompany().getId(), sellerCompany.getId())) {
+            throw new AppException(ErrorCode.COMPANY_NOT_OWN);
+        }
+
+        if (listing.getStatus() != ListingStatus.AVAILABLE) {
+            log.warn("Attempt to delete listing {} which is not AVAILABLE (Status: {})", creditListingId, listing.getStatus());
+            // Trả về thông tin listing đã bị hủy/bán
+            if (listing.getStatus() == ListingStatus.CANCELLED) {
+                return buildListingResponse(listing);
+            }
+            throw new AppException(ErrorCode.LISTING_IS_NOT_AVAILABLE);
+        }
+
+        // 2. Lấy CarbonCredit liên quan và KHOÁ
+        CarbonCredit carbonCredit = listing.getCarbonCredit();
+        if (carbonCredit == null) {
+            log.error("Listing {} has no associated CarbonCredit. Deleting listing entry only.", listing.getId());
+            marketplaceListingRepository.delete(listing);
+            return buildListingResponse(listing);
+        }
+
+        CarbonCredit lockedCredit = carbonCreditRepository.findByIdWithPessimisticLock(carbonCredit.getId())
+                .orElseThrow(() -> new AppException(ErrorCode.CREDIT_NOT_FOUND));
+
+        // 3. Lấy số lượng cần hoàn trả
+        BigDecimal quantityToRestore = safe(listing.getQuantity());
+
+        if (quantityToRestore.compareTo(BigDecimal.ZERO) > 0) {
+            // 4. Hoàn trả số lượng
+            BigDecimal listedAmount = safe(lockedCredit.getListedAmount());
+            BigDecimal availableAmount = safe(lockedCredit.getCarbonCredit()); // carbonCredit field = available
+
+            BigDecimal updatedListed = listedAmount.subtract(quantityToRestore);
+            BigDecimal updatedAvailable = availableAmount.add(quantityToRestore);
+
+            if (updatedListed.compareTo(BigDecimal.ZERO) < 0) {
+                log.warn("Inconsistency detected: Credit {} has listedAmount {} but listing {} tried to restore {}. Setting listed to 0.",
+                        lockedCredit.getId(), listedAmount, listing.getId(), quantityToRestore);
+                updatedListed = BigDecimal.ZERO;
+            }
+
+            lockedCredit.setListedAmount(updatedListed);
+            lockedCredit.setCarbonCredit(updatedAvailable); // Cập nhật available
+            lockedCredit.setAmount(updatedAvailable.add(updatedListed)); // Cập nhật total
+
+            // 5. Cập nhật trạng thái
+            updateCreditStatus(lockedCredit, updatedAvailable, updatedListed);
+
+            // 6. Lưu CarbonCredit
+            carbonCreditRepository.save(lockedCredit);
+            log.info("Restored {} credits to CarbonCredit {} (new available: {}, new listed: {})",
+                    quantityToRestore, lockedCredit.getId(), updatedAvailable, updatedListed);
+        } else {
+            log.warn("Listing {} had 0 quantity. No credits restored to CarbonCredit {}.", listing.getId(), lockedCredit.getId());
+        }
+
+        // 7. Xóa MarketPlaceListing
+        // Tạo response DTO trước khi xóa
+        MarketplaceListingResponse response = buildListingResponse(listing);
+        marketplaceListingRepository.delete(listing);
+        log.info("Deleted MarketPlaceListing {}", listing.getId());
+
+        return response;
+    }
+
+    private void updateCreditStatus(CarbonCredit credit, BigDecimal available, BigDecimal listed) {
+        if (listed.compareTo(BigDecimal.ZERO) > 0) {
+            credit.setStatus(CreditStatus.LISTED);
+        } else if (available.compareTo(BigDecimal.ZERO) > 0) {
+            credit.setStatus(CreditStatus.AVAILABLE);
+        } else {
+            credit.setStatus(CreditStatus.RETIRED);
+        }
+    }
+
+    private MarketplaceListingResponse buildListingResponse(MarketPlaceListing listing) {
+        BigDecimal remainingQuantity = listing.getQuantity() != null ? listing.getQuantity() : BigDecimal.ZERO;
+        BigDecimal soldQuantity = listing.getSoldQuantity() != null ? listing.getSoldQuantity() : BigDecimal.ZERO;
+
+        BigDecimal originalQuantity = listing.getOriginalQuantity();
+        if (originalQuantity == null || originalQuantity.compareTo(BigDecimal.ZERO) <= 0) {
+            originalQuantity = remainingQuantity.add(soldQuantity);
+        }
+
+        CarbonCredit carbonCredit = listing.getCarbonCredit();
+        Project project = carbonCredit != null ? carbonCredit.getProject() : null;
+        CreditBatch batch = carbonCredit != null ? carbonCredit.getBatch() : null;
+
+        // Lấy thông tin số dư credit hiện tại
+        CarbonCredit credit = listing.getCarbonCredit();
+        BigDecimal remainingBalance = credit.getCarbonCredit() != null ?
+                credit.getCarbonCredit() : BigDecimal.ZERO;
+        BigDecimal totalListed = credit.getListedAmount() != null ?
+                credit.getListedAmount() : BigDecimal.ZERO;
+
+        return MarketplaceListingResponse.builder()
+                .listingId(listing.getId())
+                .quantity(remainingQuantity)
+                .availableQuantity(remainingQuantity)
+                .originalQuantity(originalQuantity)
+                .soldQuantity(soldQuantity)
+                .pricePerCredit(listing.getPricePerCredit())
+                .sellerCompanyName(listing.getCompany().getCompanyName())
+                .projectId(project != null ? project.getId() : null)
+                .projectTitle(project != null ? project.getTitle() : null)
+                .expiresAt(listing.getExpiresAt())
+                .logo(project != null ? project.getLogo() : null)
+                // Thêm thông tin số dư
+                .remainingCreditBalance(remainingBalance)
+                .totalListedAmount(totalListed)
+                .carbonCreditId(carbonCredit != null ? carbonCredit.getId() : null)
+                .batchId(batch != null ? batch.getId() : null)
+                .batchCode(batch != null ? batch.getBatchCode() : null)
+                .build();
+    }
+
+    private BigDecimal getAvailableCreditAmount(CarbonCredit credit) {
+        if (credit == null) {
+            return BigDecimal.ZERO;
+        }
+
+        // carbonCredit là số lượng available
+        BigDecimal directBalance = credit.getCarbonCredit();
+        if (directBalance != null && directBalance.compareTo(BigDecimal.ZERO) > 0) {
+            return directBalance;
+        }
+
+        // lấy số lượng
+        BigDecimal amount = credit.getAmount();
+
+        //Số lượng đã list trên sàn
+        BigDecimal listedAmount = credit.getListedAmount() != null ? credit.getListedAmount() : BigDecimal.ZERO;
+
+        if (amount != null && amount.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal remaining = amount.subtract(listedAmount);
+            return remaining.compareTo(BigDecimal.ZERO) > 0 ? remaining : BigDecimal.ZERO;
+        }
+
+
+        return BigDecimal.ZERO;
+    }
+
+    private CarbonCredit resolveOwnedCredit(Long creditId, Company company, BigDecimal requiredQuantity) {
+        if (creditId == null) {
+            throw new ResourceNotFoundException("Carbon credit block not found");
+        }
+
+        try {
+            // B1: Tìm trực tiếp credit với credit id và companyID
+            CarbonCredit directCredit = carbonCreditRepository.findByIdAndCompanyId(creditId, company.getId())
+                    .orElse(null);
+
+            if (directCredit != null) {
+                BigDecimal available = getAvailableCreditAmount(directCredit);
+                if (requiredQuantity == null || available.compareTo(requiredQuantity) >= 0) {
+                    return directCredit;
+                }
+            }
+
+            List<CarbonCredit> candidateCredits = carbonCreditRepository
+                    .findCreditsBatchOrChainLinkedToIdWithSufficientAmount(
+                            creditId, company.getId(), requiredQuantity);
+
+            if (!candidateCredits.isEmpty()) {
+                return candidateCredits.get(0);
+            }
+
+            // Nếu không tìm thấy credits nào, trả về lỗi cụ thể
+            throw new AppException(ErrorCode.NO_AVAILABLE_CREDITS);
+
+        } catch (DataAccessException e) {
+            // Xử lý lỗi cơ sở dữ liệu
+            log.error("Database error while searching for carbon credits: {}", e.getMessage());
+            throw new AppException(ErrorCode.NO_AVAILABLE_CREDITS);
+        }
+    }
+
+}
+

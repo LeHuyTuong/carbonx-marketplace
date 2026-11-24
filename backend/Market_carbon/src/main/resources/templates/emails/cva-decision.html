@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CarbonX – CVA Decision</title>
+  <style>
+    body {
+      margin: 0;
+      background: #f6f7fb;
+      color: #111827;
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+    }
+    .wrapper { padding: 24px; }
+    .card {
+      max-width: 640px; margin: 0 auto; background: #ffffff;
+      border-radius: 14px; box-shadow: 0 6px 24px rgba(17, 24, 39, .06);
+      overflow: hidden;
+      border-top: 6px solid #00a86b;
+    }
+    .header {
+      padding: 20px 24px;
+      border-bottom: 1px solid #eef2f7;
+      display: flex; align-items: center; gap: 12px;
+      background: linear-gradient(135deg, #00a86b, #059669);
+      color: white;
+      font-weight: 600;
+      font-size: 16px;
+    }
+    .logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+    .content { padding: 24px; }
+    .badge {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      margin: 8px 0 16px;
+    }
+    .note {
+      background: #f9fafb;
+      border: 1px solid #eef2f7;
+      border-left: 4px solid #00a86b;
+      border-radius: 10px;
+      padding: 14px;
+      margin: 16px 0;
+      white-space: pre-wrap;
+      color: #374151;
+    }
+    .footer {
+      padding: 18px 24px;
+      color: #9ca3af;
+      font-size: 12px;
+      border-top: 1px solid #eef2f7;
+      text-align: center;
+      background: #f9fafb;
+    }
+  </style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="card">
+    <div class="header">
+      <img src="https://carbonx-storagee.s3.ap-southeast-2.amazonaws.com/z7189056163744_90ddda01b07a72bf3494b16a5678f571.jpg"
+           alt="CarbonX Logo"
+           class="logo">
+      <div class="title">CarbonX · Application Update</div>
+    </div>
+    <div class="content">
+      <p><strong>Company:</strong> <span th:text="${companyName}">Company Name</span></p>
+
+      <span class="badge"
+            th:text="${decision}"
+            th:style="'background-color:' + ${badgeColor} + ';'">APPROVED</span>
+
+      <p><strong>Application ID:</strong> <span th:text="${applicationId}">123</span></p>
+      <p><strong>Project:</strong> <span th:text="${projectName}">EV Replacement Program</span></p>
+      <p><strong>Reviewer:</strong> <span th:text="${reviewerName}">CVA Officer</span></p>
+
+      <!-- Review Note -->
+      <div class="note" th:text="${reviewNote}">
+        Your application meets the verification standards.
+      </div>
+
+      <!-- ⭐ NEW: Waiting For -->
+      <p style="margin-top: 20px; font-size: 14px; color: #374151;">
+        <strong>Next Step:</strong>
+      </p>
+      <div class="note" style="border-left-color:#059669;" th:text="${waitingFor}">
+        Your application is now waiting for the next review stage.
+      </div>
+
+    </div>
+    <div class="footer">
+      Thank you for participating in the CarbonX Project Approval Program.<br>
+      <span>Please keep this email for your records. Do not reply to this message.</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

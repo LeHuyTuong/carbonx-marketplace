@@ -1,0 +1,64 @@
+package com.carbonx.marketcarbon.model;
+
+import com.carbonx.marketcarbon.common.ProfitDistributionStatus;
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+/**
+ * Entity này ghi lại thông tin của một đợt chia lợi nhuận tổng thể
+ */
+@Entity
+@Table(name = "profit_distribution")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class ProfitDistribution extends BaseEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    // Công ty/Quản trị viên thực hiện chia sẻ
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "company_user_id", nullable = false)
+    private User companyUser;
+
+    // Dự án mà đợt chia sẻ này áp dụng
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "project_id")
+    private Project project;
+
+    // Báo cáo phát thải mà đợt chia sẻ này chi trả.
+    // Liên kết này là bắt buộc để retry chỉ trả lại các owner còn FAILED
+    // thay vì chạy lại toàn bộ report và trả tiền hai lần.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "emission_report_id")
+    private EmissionReport emissionReport;
+
+    // Tổng số tiền được chia sẻ trong đợt này
+    @Column(nullable = false)
+    private BigDecimal totalMoneyDistributed;
+
+    // Tổng số tín chỉ được chia sẻ trong đợt này
+    @Column(nullable = false)
+    private BigDecimal totalCreditsDistributed;
+
+    // Trạng thái của đợt chia sẻ (PENDING, PROCESSING, COMPLETED, FAILED)
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private ProfitDistributionStatus status;
+
+    // Token của worker đang giữ quyền xử lý đợt này. Mọi heartbeat và chuyển trạng thái
+    // phải khớp token; một worker bị reclaim không thể ghi đè claim mới.
+    @Column(name = "claim_token", length = 36)
+    private String claimToken;
+
+    // Chi tiết các khoản thanh toán cho từng EV Owner
+    @OneToMany(mappedBy = "distribution", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private List<ProfitDistributionDetail> details;
+}

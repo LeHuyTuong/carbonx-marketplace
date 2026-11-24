@@ -1,0 +1,110 @@
+package com.carbonx.marketcarbon.config;
+
+import lombok.extern.slf4j.Slf4j;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+import java.nio.charset.StandardCharsets;
+
+import javax.crypto.SecretKey;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+@Slf4j
+@Component
+public class JwtTokenValidator extends OncePerRequestFilter {
+
+    // P0-A (N4): secret injected from configuration (jwt.secret / JWT_SECRET env).
+    private final SecretKey signingKey;
+
+    public JwtTokenValidator(@org.springframework.beans.factory.annotation.Value("${jwt.secret}") String secret) {
+        this.signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static final List<String> PUBLIC_PATHS = List.of(
+            "/api/v1/auth/register",
+            "/api/v1/auth/register/resend-otp",
+            "/api/v1/auth/verify-otp",
+            "/api/v1/send-otp-forgot",
+            "/api/v1/auth/send-otp-register",
+            "/api/v1/auth/reset-password",
+            "/api/v1/auth/forgot-password",
+            "/api/v1/auth/login",
+            "/api/v1/send-otp-forgot",
+            "/api/v1/check-exists-user",
+            "/api/v1/projects/all",
+            "/api/v1/forgot-password/resend-otp"
+    );
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
+
+        String path = request.getRequestURI();
+
+        if (path.startsWith("/oauth2/") || path.startsWith("/login/oauth2/") || path.startsWith("/error")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        if (PUBLIC_PATHS.stream().anyMatch(path::startsWith)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        String jwt = request.getHeader(JwtConstant.JWT_HEADER);
+
+        if (jwt == null || !jwt.startsWith("Bearer ")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        jwt = jwt.substring(7);
+
+        try {
+            SecretKey key = signingKey;
+            Claims claims = Jwts.parserBuilder()
+                    .setSigningKey(key)
+                    .build()
+                    .parseClaimsJws(jwt)
+                    .getBody();
+
+            String email = String.valueOf(claims.get("email"));
+            Object rolesObj = claims.get("roles");
+
+            List<GrantedAuthority> auths = new ArrayList<>();
+            if (rolesObj instanceof List<?>) {
+                for (Object role : (List<?>) rolesObj) {
+                    auths.add(new SimpleGrantedAuthority("ROLE_" + role.toString()));
+                }
+            }
+
+            Authentication authentication =
+                    new UsernamePasswordAuthenticationToken(email, null, auths);
+
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+
+            log.debug("JWT accepted for user {} with roles {}", email, auths);
+
+        } catch (io.jsonwebtoken.ExpiredJwtException e) {
+            log.warn("JWT rejected: expired at {}", e.getClaims().getExpiration());
+        } catch (Exception e) {
+            log.warn("JWT rejected: {}", e.getMessage());
+        }
+
+        filterChain.doFilter(request, response);
+    }
+}

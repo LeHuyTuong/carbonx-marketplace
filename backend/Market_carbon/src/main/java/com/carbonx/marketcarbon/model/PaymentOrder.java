@@ -1,0 +1,50 @@
+package com.carbonx.marketcarbon.model;
+
+import com.carbonx.marketcarbon.common.PaymentMethod;
+import com.carbonx.marketcarbon.common.Status;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.math.BigDecimal;
+
+@Entity
+@AllArgsConstructor
+@NoArgsConstructor
+@Data
+@Builder
+public class PaymentOrder extends BaseEntity{
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    private Long amount;
+
+    private Status status = Status.PENDING;
+
+    @Enumerated(EnumType.STRING)
+    private PaymentMethod paymentMethod ;
+
+    @ManyToOne
+    @JoinColumn(name = "user_id")
+    @JsonIgnore
+    private User user;
+
+    @ManyToOne
+    @JoinColumn(name = "payment_order_id")
+    @JsonIgnore
+    private PaymentOrder order;
+
+
+    @Column(unique = true)
+    private String vnpTxnRef; // Mã giao dịch của VNPay
+
+    // P0-B/B1: provider payment reference (Stripe Checkout session id / PayPal payment id)
+    // saved server-side at link creation, so success can later be verified with the provider.
+    // Client-supplied payment ids are never trusted for crediting.
+    @Column(name = "provider_ref")
+    private String providerRef;
+}

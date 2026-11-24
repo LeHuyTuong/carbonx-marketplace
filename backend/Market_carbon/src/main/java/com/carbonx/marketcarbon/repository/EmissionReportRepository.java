@@ -1,0 +1,90 @@
+package com.carbonx.marketcarbon.repository;
+
+import com.carbonx.marketcarbon.common.EmissionStatus;
+import com.carbonx.marketcarbon.model.Company;
+import com.carbonx.marketcarbon.model.EmissionReport;
+import com.carbonx.marketcarbon.model.Project;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import java.util.List;
+import java.util.Optional;
+
+public interface EmissionReportRepository extends JpaRepository<EmissionReport, Long>,
+        JpaSpecificationExecutor<EmissionReport> {
+    Optional<EmissionReport> findBySellerIdAndProjectIdAndPeriod(Long sellerId, Long projectId, String period);
+
+    Page<EmissionReport> findBySourceIgnoreCase(String source, Pageable pageable);
+
+    Page<EmissionReport> findBySourceIgnoreCaseAndStatus(String source, EmissionStatus status, Pageable pageable);
+
+    Page<EmissionReport> findByStatus(EmissionStatus status, Pageable pageable);
+
+    List<EmissionReport> findBySeller_Id(Long sellerId);
+
+    List<EmissionReport> findBySeller_IdAndStatus(Long sellerId, EmissionStatus status);
+    List<EmissionReport> findBySeller_IdAndProject_Id(Long sellerId, Long projectId);
+    List<EmissionReport> findBySeller_IdAndProject_IdAndStatus(Long sellerId, Long projectId, EmissionStatus status);
+    int countByProjectIdAndSeller_IdNot(Long projectId, Long sellerId);
+
+    Optional<EmissionReport> findTopByProjectAndSellerAndPeriodBeforeOrderByPeriodDesc(
+            Project project, Company seller, String period);
+
+    Optional<EmissionReport> findById(Long id);
+    /**
+     * Tìm tất cả các báo cáo theo trạng thái
+     */
+    List<EmissionReport> findByStatus(EmissionStatus status);
+
+
+    /**
+     * Tải EmissionReport và fetch EAGER collection 'details'
+     * để tránh LazyInitializationException khi không có Transaction.
+     */
+    @Query("SELECT r FROM EmissionReport r WHERE r.id = :id")
+    @EntityGraph(attributePaths = {"details"})
+    Optional<EmissionReport> findByIdWithDetails(@Param("id") Long id);
+
+    /**
+     * Khóa report trong lúc kiểm tra "đã có payout chưa" và tạo distribution.
+     * Hai request /share đồng thời sẽ được tuần tự hóa trên cùng row report,
+     * nên request thứ hai nhìn thấy distribution của request thứ nhất.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM EmissionReport r WHERE r.id = :id")
+    Optional<EmissionReport> findByIdForUpdate(@Param("id") Long id);
+
+    // Tổng số report
+    @Query("SELECT COUNT(e) FROM EmissionReport e")
+    long countAllReports();
+
+    // Đếm report theo tháng (cho dashboard chart)
+    @Query(value = """
+        SELECT 
+            MONTHNAME(e.created_at) AS month,
+            SUM(CASE WHEN e.status IN ('CVA_APPROVED', 'ADMIN_APPROVED', 'CREDIT_ISSUED', 'APPROVED', 'PAID_OUT') THEN 1 ELSE 0 END) AS approved,
+            SUM(CASE WHEN e.status IN ('DRAFT', 'SUBMITTED') THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN e.status IN ('CVA_REJECTED', 'ADMIN_REJECTED', 'REJECTED') THEN 1 ELSE 0 END) AS rejected
+        FROM emission_reports e
+        GROUP BY MONTH(e.created_at), MONTHNAME(e.created_at)
+        ORDER BY MONTH(e.created_at)
+    """, nativeQuery = true)
+    List<Object[]> countMonthlyReportStatusNative();
+
+    Optional<EmissionReport> findTopBySeller_IdOrderByCreatedAtDesc(Long companyId);
+
+    Page<EmissionReport> findBySourceIgnoreCaseAndStatusIn(
+            String source,
+            List<EmissionStatus> statuses,
+            Pageable pageable
+    );
+
+
+}

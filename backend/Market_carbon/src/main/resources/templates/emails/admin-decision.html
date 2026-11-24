@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CarbonX – Admin Final Decision</title>
+  <style>
+    body {
+      margin: 0;
+      background: #f6f7fb;
+      color: #111827;
+      font-family: Inter, Segoe UI, Arial, sans-serif;
+    }
+    .wrapper { padding: 24px; }
+    .card {
+      max-width: 640px;
+      margin: 0 auto;
+      background: #ffffff;
+      border-radius: 14px;
+      box-shadow: 0 6px 24px rgba(17, 24, 39, .06);
+      overflow: hidden;
+      border-top: 6px solid #00a86b;
+    }
+    .header {
+      padding: 20px 24px;
+      border-bottom: 1px solid #eef2f7;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: linear-gradient(135deg, #00a86b, #059669);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+    }
+    .logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: transparent;
+    }
+    .content { padding: 24px; line-height: 1.6; }
+    .badge {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      margin: 8px 0 16px;
+    }
+    .note {
+      background: #f9fafb;
+      border: 1px solid #eef2f7;
+      border-left: 4px solid #00a86b;
+      border-radius: 10px;
+      padding: 14px;
+      margin: 16px 0;
+      white-space: pre-wrap;
+      color: #374151;
+    }
+    .footer {
+      padding: 18px 24px;
+      color: #9ca3af;
+      font-size: 12px;
+      border-top: 1px solid #eef2f7;
+      background: #f9fafb;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="card">
+    <div class="header">
+      <img src="https://carbonx-storagee.s3.ap-southeast-2.amazonaws.com/z7189056163744_90ddda01b07a72bf3494b16a5678f571.jpg"
+           alt="CarbonX Logo"
+           class="logo" />
+      <div>CarbonX · Final Decision</div>
+    </div>
+
+    <div class="content">
+      <p><strong>Company:</strong> <span th:text="${companyName}">Company Name</span></p>
+
+      <span class="badge"
+            th:text="${decision}"
+            th:style="'background-color:' + ${badgeColor} + ';'">APPROVED</span>
+
+      <p><strong>Application ID:</strong> <span th:text="${applicationId}">12345</span></p>
+      <p><strong>Project:</strong> <span th:text="${projectName}">EV Replacement Program</span></p>
+      <p><strong>Final Reviewer:</strong> <span th:text="${reviewerName}">Admin User</span></p>
+
+      <div class="note" th:text="${reviewNote}">
+        All criteria met, approved for credit allocation.
+      </div>
+
+      <p style="margin-top: 24px; font-weight:600; color:#374151;">Next Step:</p>
+      <div class="note" style="border-left-color:#059669;" th:text="${waitingFor}">
+        Your application status is being processed for the next stage.
+      </div>
+
+      <p style="margin-top: 24px; color:#4b5563;">
+        This email contains the official final decision regarding your CarbonX application.
+        If you require further clarification, please contact your system administrator.
+      </p>
+    </div>
+
+    <div class="footer">
+      © 2025 CarbonX MarketCarbon — All rights reserved.<br>
+      <span style="color:#9ca3af;">This is an automated email. Please do not reply.</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>

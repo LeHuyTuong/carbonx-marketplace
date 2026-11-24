@@ -1,0 +1,77 @@
+HELP.md
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+# Ignore local data folder in FE
+frontend/src/data/
+**/application.properties
+carbonx-ai-6060f3108572.json
+
+
+
+
+
+# P0-A (N5): local secret files, never commit
+.env
+backend/Market_carbon/.env
+
+# Personal Claude Code settings (not shared with collaborators)
+.claude/settings.local.json
+
+# --- Repo hygiene (post-audit cleanup) ---
+# OS noise
+.DS_Store
+**/.DS_Store
+
+# Runtime upload/log dirs — user data never belongs in git
+backend/upload/
+backend/Market_carbon/logs/
+logs/
+uploads/
+
+# Local-only assets & tooling dirs
+local-assets/
+.commandcode/
+.freebuff/
+scratchpad-audit/
+*.code-workspace
+
+# Local dev profile — machine-specific ports/credentials, not shared.
+# The `**/application.properties` rule above does not match the -local suffix.
+**/application-local.properties
+
+# Personal engineering notes (kept on disk, not shared with collaborators)
+CV_METRICS.md
+OPTIMIZATION_LOG.md
+
+### Reviewer scratch (local MariaDB datadir, logs, vendored sources) ###
+.review-tmp/
