@@ -1,4 +1,4 @@
-# Master Plan — CarbonX Marketplace (DDD Modular Monolith → Microservices)
+# Master Plan — CarbonX Distributed Microservices Platform
 
 Mỗi tầng có Quyết định (chọn gì), Lý do (vì sao), Luật (AI phải theo, viết dạng "luôn ..." hoặc "không bao giờ ...").
 Tầng sau không được mâu thuẫn tầng trước. Muốn đổi một quyết định thì sửa file này trước, rồi mới sửa code.
@@ -6,37 +6,39 @@ Task nào đi ngược file này thì dừng lại và hỏi.
 
 ## 1. Nghiệp vụ
 ### Quyết định
-- Hệ thống sàn giao dịch tín chỉ carbon xe điện gồm 4 vai trò (`EV_OWNER`, `COMPANY`, `CVA`, `ADMIN`) vận hành chuỗi MRV 2 cấp (CVA → Admin), phát hành lô tín chỉ bất biến theo phương pháp luận `VM0038`, mua bán trên sàn (phí sàn 5%), triệt tiêu tín chỉ và chia sẻ doanh thu về ví chủ xe điện.
-- Luồng mua tín chỉ bằng số dư ví được chuẩn hoá thành thanh toán tức thì 1 bước (`Order` chuyển thẳng `FINISHED`, trừ ví người mua, cộng ví người bán và chuyển quyền sở hữu tín chỉ trong cùng một luồng chốt đơn, loại bỏ trạng thái `PENDING` thừa).
-- Mục tiêu sản phẩm là Portfolio Showcase kỹ thuật sâu, chạy thực tế bằng Docker Compose và tái sử dụng toàn bộ giao diện React 19 hiện tại.
+- Hệ thống sàn giao dịch tín chỉ carbon xe điện gồm 4 vai trò (`EV_OWNER`, `COMPANY`, `CVA`, `ADMIN`) vận hành chuỗi MRV 2 cấp (CVA → Admin), phát hành lô tín chỉ bất biến theo phương pháp luận `VM0038`, tách phần nắm giữ `Credit Holdings` (bán 80 giữ 20 để dùng), mua bán trên sàn (phí sàn 5%), triệt tiêu tín chỉ và chia sẻ doanh thu về ví chủ xe điện kèm truy vết nguồn gốc `Payout Items`.
+- Luồng mua tín chỉ bằng ví vận hành theo mô hình thanh toán tức thì 1 bước cho người dùng cuối, được điều phối ngầm qua **Order Saga** giữa `trading-service`, `registry-service` và `ledger-service` kèm giao dịch bù trừ (Compensating Transactions).
+- Mục tiêu sản phẩm là kiến trúc Microservices hoàn chỉnh theo 6 trụ cột chuẩn Solution Architect, chạy thực tế trên Docker Compose và sẵn sàng triển khai Kubernetes (GKE / Cloud Run).
 ### Lý do
-- Chốt chặt luồng nghiệp vụ và loại bỏ bước thừa giúp ranh giới domain ổn định trước khi tách module DDD và tránh sửa chéo nhiều service về sau.
+- Tách bạch ranh giới nghiệp vụ và điều phối bằng Saga đảm bảo tính nhất quán cuối cùng (Eventual Consistency) khi mỗi microservice sở hữu cơ sở dữ liệu độc lập.
 ### Luật
 - Luôn giữ nguyên 4 vai trò và quy trình thẩm định 2 cấp (CVA trước, Admin sau) khi phát hành tín chỉ.
 - Luôn ghi nhận tối thiểu một dòng `WalletTransaction` bất biến chứa số dư trước và sau cho mọi thay đổi số dư ví.
-- Không bao giờ cho phép sửa ngược thông số của một `Lô tín chỉ` sau khi đã phát hành.
+- Không bao giờ cho phép sửa ngược thông số của một `Credit Batch` sau khi đã phát hành.
 
 ## 2. Công nghệ
 ### Quyết định
-- Backend dùng Java 17 + Spring Boot 3.3 + MySQL 8 + Flyway + Spring Data JPA; Frontend dùng React 19 + TypeScript + Vite 6 + Tailwind CSS v4 + TanStack Query + Zustand + Nginx.
-- Thực hiện trực tiếp trên repo độc lập `carbonx-standalone` (`LeHuyTuong/carbonx-marketplace`), đổi `artifactId` backend sang `carbonx-backend`.
-- Lộ trình: Pha 1 dựng DDD Modular Monolith trong 1 ứng dụng Spring Boot; Pha 2 bổ sung Spring Cloud Gateway và Apache Kafka (KRaft mode) để tách `mrv-service` và `notification-service`.
+- Core & Hạ tầng Spring Cloud (`2023.0.3` trên Java 17 + Spring Boot `3.3.3`): Maven Multi-Module 10 modules gồm `common-kernel`, `config-server` (`:8888` + `Spring Cloud Bus` qua Kafka + `@RefreshScope`), `discovery-server` (`:8761` Netflix Eureka), `api-gateway` (`:8080` Spring Cloud Gateway WebFlux + `Spring Cloud LoadBalancer` + Swagger UI tập trung `springdoc-openapi-starter-webflux-ui`), cùng 6 domain microservices (`identity-service` `:8081`, `mrv-service` `:8082`, `registry-service` `:8083`, `trading-service` `:8084`, `ledger-service` `:8085`, `notification-service` `:8086`).
+- Giao tiếp, Chịu lỗi & AI: Đồng bộ qua **Spring Cloud OpenFeign** bọc **Resilience4j** (Circuit Breaker, Retry, Rate Limiter, Bulkhead — thay thế hoàn toàn Hystrix/Ribbon); Bất đồng bộ qua **Apache Kafka (KRaft)**; Cache dùng **Redis**; Tích hợp AI bằng **Spring AI `ChatClient`** (`spring-ai-openai-spring-boot-starter`) cho CVA Suggest Score và AI Chat Widget.
+- Đóng gói & Điều phối Cloud: Multi-stage `Dockerfile` với base image bảo mật **Google Distroless (`gcr.io/distroless/java17-debian12:nonroot`)**, kèm bộ manifest **Kubernetes (`k8s/configmap.yaml`, `secret.yaml`, `deployment.yaml`, `service.yaml`)** sẵn sàng cho GKE / Cloud Run.
 ### Lý do
-- Giữ vững stack ổn định đã có giúp tập trung toàn bộ công sức vào kiến trúc DDD, Flyway, Outbox và tách Microservices theo từng bước an toàn.
+- Áp dụng đầy đủ 6 trụ cột công nghệ chuẩn Spring Cloud, Kafka, Redis, Spring AI, Distroless và Kubernetes giải quyết trọn vẹn bài toán định tuyến, phát hiện dịch vụ, cấu hình nóng, chịu lỗi và vận hành cloud-native.
 ### Luật
-- Luôn đóng gói toàn bộ dịch vụ chạy được bằng `docker compose up` trên máy local.
-- Không bao giờ thêm thư viện bên thứ ba nếu chưa kiểm tra lỗ hổng và phiên bản tương thích Java 17 / React 19.
+- Luôn đóng gói mọi microservice bằng multi-stage Dockerfile trên nền `gcr.io/distroless/java17-debian12:nonroot`.
+- Không bao giờ dùng thư viện đã ngừng phát triển như Netflix Hystrix hoặc Ribbon; bắt buộc dùng `Resilience4j` và `Spring Cloud LoadBalancer`.
 
 ## 3. Design pattern
 ### Quyết định
-- Pattern đã chọn: Pragmatic DDD Modular Monolith kết hợp Transactional Outbox (`outbox_events`), Port/Adapter (`DomainEventPublisher`), Khoá bi quan (`PESSIMISTIC_WRITE` / `SELECT ... FOR UPDATE`) và Idempotency Key.
-- Áp tới mức nào: Các luồng tài chính và thay đổi tồn kho (`Order`, `Wallet`, `Withdrawal`, `ProfitSharing`) dùng khoá bi quan + Idempotency Key + ghi Domain Event vào bảng `outbox_events`; các luồng đọc/cập nhật hồ sơ đơn giản (KYC, xe điện, danh mục dự án) dùng một database transaction cục bộ là đủ.
-- Khi sập: Trạng thái sự kiện lưu bền vững trong bảng `outbox_events` (`PENDING`, `SENT`, `FAILED`) và trạng thái chi trả lưu trên từng dòng `ProfitDistributionDetail` với `claim_token`; khi khởi động lại, `OutboxRelayScheduler` quét lại các bản ghi chưa gửi; nếu một sự kiện lỗi liên tiếp 5 lần thì chuyển sang trạng thái `DEAD_LETTER`, dừng thử lại tự động và phát cảnh báo cho đội vận hành.
+- Pattern đã chọn: **Database-per-Service** + **Pragmatic DDD** + **Logical CQRS** (`*CommandUseCase` tách biệt `*QueryUseCase`) + **Saga Pattern** (Orchestration kết hợp Compensating Transactions) + **Transactional Outbox** + **Resilience4j** (Circuit Breaker, Retry, Rate Limiter, Bulkhead) + Idempotency Key.
+- Áp tới mức nào: Giao dịch liên service (Mua tín chỉ giữa `trading`, `registry`, `ledger`) dùng Order Saga + OpenFeign/Kafka + Idempotency Key + Outbox; luồng trong nội bộ 1 service (`Wallet`, `CreditHolding`) dùng khoá bi quan `FOR UPDATE` + 1 DB transaction cục bộ; mọi lời gọi sang service khác, Spring AI hoặc cổng thanh toán bắt buộc bọc Resilience4j.
+- Khi sập: Bước sau trong Order Saga thất bại thì kích hoạt giao dịch bù trừ hoàn khoá `CreditHolding` / hoàn tiền ví; LLM lỗi thì Circuit Breaker `aiScoring` mở mạch và trả điểm fallback từ 8 luật gian lận; sự kiện Outbox lỗi quá 5 lần chuyển sang `DEAD_LETTER` và phát cảnh báo cho đội vận hành.
 ### Lý do
-- Pragmatic DDD kết hợp Transactional Outbox cho phép chạy in-process nhẹ nhàng ở Pha 1 và chuyển sang Kafka Producer ở Pha 2 mà không phải sửa logic nghiệp vụ lõi.
+- Kết hợp Saga, Outbox, CQRS và Resilience4j giải quyết triệt để bài toán giao dịch phân tán không có 2PC và ngăn chặn lỗi sập dây chuyền (Cascading Failure).
 ### Luật
-- Luôn ghi Domain Event vào bảng `outbox_events` trong cùng transaction với thay đổi dữ liệu của Aggregate Root.
-- Không bao giờ để một luồng chuyển tiền hoặc chốt đơn chạy mà thiếu khoá bi quan hoặc cơ chế chống xử lý trùng (idempotency).
+- Luôn tách riêng interface `*CommandUseCase` và `*QueryUseCase` trong gói `application.port.in` của mỗi microservice.
+- Luôn định nghĩa giao dịch bù trừ (compensating action) và `Idempotency-Key` cho mọi bước thay đổi trạng thái trong Saga.
+- Luôn bọc `Resilience4j` kèm fallback cho mọi `@FeignClient`, lời gọi Spring AI và cổng thanh toán bên ngoài.
+- Không bao giờ để hai microservice đọc hoặc ghi chung một cơ sở dữ liệu vật lý.
 
 ## 4. UI
 ### Quyết định
@@ -64,7 +66,7 @@ Task nào đi ngược file này thì dừng lại và hỏi.
 
 ## 6. Kiểm thử
 ### Quyết định
-- Áp dụng 3 lớp kiểm thử tự động: `ArchUnit` (kiểm tra ranh giới 6 module DDD), `JUnit 5 + Testcontainers MySQL 8` (kiểm thử bất biến tiền, khoá `FOR UPDATE`, Transactional Outbox và phân quyền `403`), và `Vitest + React Testing Library` cho Frontend.
+- Áp dụng 3 lớp kiểm thử tự động: `ArchUnit` (6 luật kiểm tra ranh giới DDD, CQRS và Clean Code: cấm gọi chéo module, cấm Controller gọi thẳng Repository, cấm trả JPA Entity ra API, cấm `@Autowired` field injection, cấm `System.out`/`printStackTrace`), `JUnit 5 + Testcontainers MySQL 8` (kiểm thử bất biến tiền, khoá `FOR UPDATE`, Outbox, Circuit Breaker fallback và phân quyền `403`), và `Vitest` cho Frontend.
 - Mọi bản vá bảo mật hoặc luồng tiền đều phải đi kèm test hồi quy (regression test).
 ### Lý do
 - Kết hợp ArchUnit và Testcontainers trên MySQL thật bắt được cả vi phạm kiến trúc lẫn lỗi tranh chấp đồng thời mà Mockito đơn thuần bỏ sót.
@@ -75,8 +77,8 @@ Task nào đi ngược file này thì dừng lại và hỏi.
 
 ## 7. Bảo mật
 ### Quyết định
-- Áp dụng RBAC chặt ở tầng server bằng `@PreAuthorize` trên mọi controller, xác thực JWT stateless (tắt `httpBasic`, ẩn Swagger ở production, truyền token OAuth2 qua URL fragment `#token=`).
-- Fail-closed toàn bộ secret (`JWT_SECRET`, khoá cổng thanh toán, mật khẩu DB) ở `application-prod.properties` và `docker-compose.yml`; ẩn hoàn toàn khối đăng nhập mẫu khỏi bundle production; bật security headers trên Nginx (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `server_tokens off`).
+- Kết hợp **Spring Security + OAuth 2.0 / OpenID Connect (Google OAuth2 Client)** và **JWT stateless** truyền danh tính & quyền (`ROLE_EV_OWNER`, `ROLE_COMPANY`, `ROLE_CVA`, `ROLE_ADMIN`) xuyên qua `api-gateway` xuống 6 microservices, kiểm tra `@PreAuthorize` ngay tại từng service.
+- Fail-closed toàn bộ secret qua biến môi trường / Kubernetes `Secret` (hỗ trợ mở rộng sang HashiCorp Vault / Secret Manager) và thiết kế sẵn cấu hình mTLS cho kênh nội bộ service-to-service; ẩn khối đăng nhập mẫu khỏi bundle production; bật security headers trên Nginx.
 ### Lý do
 - Sàn giao dịch tài chính và tín chỉ carbon có rủi ro cao về leo thang đặc quyền, IDOR và rò rỉ chứng từ nếu chỉ dựa vào ẩn nút ở Frontend.
 ### Luật
@@ -96,14 +98,14 @@ Task nào đi ngược file này thì dừng lại và hỏi.
 
 ## 9. Ranh giới domain và chia việc
 ### Quyết định
-- Chia backend thành 6 Bounded Contexts độc lập: `identity`, `mrv`, `registry`, `trading`, `ledger`, `notification`, cùng 1 kernel nhỏ `shared` (chỉ chứa `BaseEntity`, Value Objects bất biến, `DomainEvent` và hạ tầng Outbox).
-- Mỗi module cấu trúc thống nhất 4 gói con: `api`, `application`, `domain`, `infrastructure`.
-- Giao tiếp đồng bộ liên module chỉ đi qua Public Port ở gói `api` hoặc `application.port`; giao tiếp bất đồng bộ đi qua `DomainEvent` trong Outbox.
+- Tách thành **6 Microservices độc lập (Database-per-Service)**: `identity-service` (`carbonx_identity`), `mrv-service` (`carbonx_mrv`), `registry-service` (`carbonx_registry` + Redis cache), `trading-service` (`carbonx_trading`), `ledger-service` (`carbonx_ledger`), `notification-service` (`carbonx_notification`), cùng thư viện hợp đồng nhẹ `common-kernel` (`Money`, `SerialRange`, `DomainEvent`, `OutboxPort`, `CleanCodeArchTest`).
+- Mỗi microservice tuân thủ đúng 4 gói DDD: `api` (REST Controllers + Feign Contracts), `application` (`port.in` CQRS `*CommandUseCase` / `*QueryUseCase` + `port.out`), `domain` (Aggregates + Value Objects), `infrastructure` (JPA, Kafka, Redis, External Adapters).
+- Giao tiếp đồng bộ liên service đi qua `@FeignClient` + `Spring Cloud LoadBalancer` + `Resilience4j`; giao tiếp bất đồng bộ đi qua `OutboxPort` → **Apache Kafka**.
 ### Lý do
-- Ranh giới rõ ràng theo Bounded Context cho phép nhiều agent hoặc lập trình viên làm việc song song trên các module khác nhau mà không giẫm chân nhau.
+- Mỗi microservice là một đơn vị build, deploy và sở hữu DB riêng biệt giúp chia việc độc lập hoàn toàn và scale riêng từng điểm nóng (như `mrv-service` hay `trading-service`).
 ### Luật
-- Không bao giờ cho phép một module import trực tiếp lớp trong gói `infrastructure` hoặc `repository` của module khác.
-- Không bao giờ đưa logic nghiệp vụ đặc thù của một module vào gói `shared`.
+- Không bao giờ cho phép một microservice phụ thuộc Maven trực tiếp vào microservice khác (chỉ được dùng `common-kernel` và hợp đồng REST/Kafka).
+- Không bao giờ đưa logic nghiệp vụ đặc thù của một service vào `common-kernel`.
 
 ## 10. Vận hành sự cố
 ### Quyết định

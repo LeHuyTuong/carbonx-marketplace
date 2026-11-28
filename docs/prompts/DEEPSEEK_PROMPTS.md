@@ -1,145 +1,115 @@
-# Bộ Prompt Triển Khai CarbonX DDD Modular Monolith → Microservices (Dành cho DeepSeek)
+# Bộ Prompt Triển Khai CarbonX 10-Module Microservices (Dành cho DeepSeek)
 
-> **Cách dùng**: Giao cho DeepSeek chạy **tuần tự từ Prompt 1 → Prompt 7** ngay trong thư mục `backend/carbonx-backend`.
-> Sau MỖI prompt, bắt buộc chạy `mvn test -B` để xác nhận `ModuleBoundaryArchTest` (ArchUnit) và các test mới đều **PASS 100%** trước khi sang prompt tiếp theo.
+> **Kiến trúc đã dựng sẵn**: Maven Multi-Module Reactor 10 modules tại `backend/`:
+> - Hạ tầng Spring Cloud (`2023.0.3`): `common-kernel`, `config-server` (`:8888` + Spring Cloud Bus Kafka), `discovery-server` (`:8761` Netflix Eureka), `api-gateway` (`:8080` WebFlux + LoadBalancer + Resilience4j + Swagger UI tập trung).
+> - 6 Microservices độc lập (**Database-per-Service** + Flyway + DDD + Logical CQRS + OpenFeign + Resilience4j + Kafka Outbox + Distroless Dockerfile):
+>   1. `identity-service` (`:8081`, DB `carbonx_identity`, OAuth2 Google + JWT)
+>   2. `mrv-service` (`:8082`, DB `carbonx_mrv`, Spring AI `ChatClient` + 8 Fraud Rules)
+>   3. `registry-service` (`:8083`, DB `carbonx_registry` + Redis Cache + 80/20 `CreditHoldings`)
+>   4. `trading-service` (`:8084`, DB `carbonx_trading` + Order Saga Orchestrator + Compensating Transactions)
+>   5. `ledger-service` (`:8085`, DB `carbonx_ledger` + Immutable `WalletTransactions` + `PayoutItems` Provenance)
+>   6. `notification-service` (`:8086`, DB `carbonx_notification` + Kafka Consumer + SSE Realtime + Email)
+> - Đóng gói & K8s: `Dockerfile` Distroless (`gcr.io/distroless/java17-debian12:nonroot`), `docker-compose.yml`, `k8s/{configmap,secret,deployment,service}.yaml`.
 
 ---
 
 ## Prompt 0 — System Context (Dán kèm đầu mỗi phiên làm việc với DeepSeek)
 
 ```text
-Bạn là Senior Java/Spring Boot Architect triển khai dự án CarbonX Marketplace tại `backend/carbonx-backend` (Java 17, Spring Boot 3.3, MySQL 8, Flyway, ArchUnit, Testcontainers).
+Bạn là Principal Distributed Systems Architect triển khai các Microservices của CarbonX tại `backend/`.
 
-NGUỒN SỰ THẬT BẮT BUỘC PHẢI ĐỌC TRƯỚC KHI CODE:
-1. `MASTER-PLAN.md` ở thư mục gốc repo (10 tầng kiến trúc & luật bắt buộc).
-2. `docs/diagrams/services/01..05` (ERD từng Bounded Context bằng tiếng Anh).
-3. `backend/carbonx-backend/src/main/resources/db/migration/V1..V5*.sql` (lược đồ bảng chuẩn — KHÔNG thêm FK chéo module).
-4. `backend/Market_carbon/` (chỉ đọc để tham khảo công thức nghiệp vụ cũ như VM0038, 8 luật gian lận, VNPay HMAC — KHÔNG copy cấu trúc layered cũ).
+NGUỒN SỰ THẬT BẮT BUỘC ĐỌC TRƯỚC KHI CODE:
+1. `MASTER-PLAN.md` (10 tầng kiến trúc & luật bắt buộc).
+2. `docs/diagrams/architecture.png` & `docs/diagrams/services/01..05` (Architecture & 5 Service ERDs).
+3. `backend/<service>/src/main/resources/db/migration/V1__*.sql` (lược đồ Database-per-Service chuẩn).
+4. `backend/common-kernel/` (`Money`, `SerialRange`, `IntegrationEvents`, `OutboxPort`, `CleanCodeArchRules`).
+5. `backend/Market_carbon/` (chỉ đọc tham khảo công thức nghiệp vụ cũ: VM0038, 8 luật gian lận DQ1..DQ8, VNPay HMAC — KHÔNG copy kiến trúc monolith cũ).
 
-LUẬT CỨNG (ArchUnit sẽ làm FAIL BUILD nếu vi phạm):
-- 6 module độc lập: `identity`, `mrv`, `registry`, `trading`, `ledger`, `notification` + kernel `shared`.
-- Mỗi module chỉ có 4 layer: `api`, `application`, `domain`, `infrastructure`.
-- Một module CHỈ ĐƯỢC import package `..api..` của module khác và `..shared..`. CẤM import `..domain..`, `..application..`, `..infrastructure..` của module khác.
-- Khung interface DDD đã dựng sẵn 100% (`application/port/in/*UseCase`, `application/port/out/*Port`, `api/*Port`, `api/*Event`, `shared/outbox/OutboxPort` & `DomainEventPublisher`) — KHÔNG sửa chữ ký interface đã chốt, chỉ implement đúng contract.
-- Mọi thay đổi tài chính/tồn kho phải có khoá bi quan (`@Lock(PESSIMISTIC_WRITE)`), `Idempotency-Key`, và ghi Domain Event vào `OutboxPort.append(...)` trong cùng transaction.
-- Mọi endpoint phải có `@PreAuthorize` rõ ràng; KHÔNG trả trực tiếp JPA Entity ra REST controller.
+LUẬT CLEAN CODE & KIẾN TRÚC BẮT BUỘC (`ServiceArchitectureTest` chạy tự động trong mỗi service, vi phạm sẽ FAIL BUILD):
+- Giữ nguyên chữ ký các interface `*CommandUseCase`, `*QueryUseCase`, `*Port` đã định nghĩa trong `application/port/in` và `application/port/out`.
+- `@RestController` chỉ gọi `*CommandUseCase` / `*QueryUseCase`, CẤM gọi thẳng `..infrastructure..` / Repository và CẤM trả trực tiếp class `@Entity`.
+- Tầng `..domain..` thuần khiết, CẤM import `..api..` hoặc `..infrastructure..`.
+- CẤM `@Autowired` field injection (chỉ dùng Constructor Injection `@RequiredArgsConstructor`), CẤM `System.out`/`printStackTrace`.
+- Mọi `@FeignClient`, lời gọi `Spring AI ChatClient`, và cổng thanh toán phải bọc `Resilience4j` (`@CircuitBreaker`, `@Retry`, `@RateLimiter`, `@Bulkhead`) kèm hàm fallback rõ ràng.
+- Sau mỗi prompt, bắt buộc chạy `cd backend && mvn test -B` xanh 10/10 modules trước khi báo hoàn tất.
 ```
 
 ---
 
-## Prompt 1 — Module `identity` (Auth, JWT, KYC, Vehicle Registry)
+## Prompt 1 — `identity-service` (`:8081`, DB `carbonx_identity`, OAuth2 Google + JWT)
 
 ```text
-Hãy triển khai hoàn chỉnh Bounded Context `com.carbonx.identity` khớp với `V1__init_identity.sql` và `docs/diagrams/services/01-identity-erd.png`.
-
-Yêu cầu chi tiết:
-1. `domain`: Entities `User`, `Company`, `KycProfile`, `Vehicle` (rich domain methods: `approveKyc()`, `rejectKyc()`, `deactivate()`), enums `Role` (`EV_OWNER`, `COMPANY`, `CVA`, `ADMIN`), `KycStatus`.
-2. `infrastructure`: JPA Repositories (`UserRepository`, `CompanyRepository`, `KycProfileRepository`, `VehicleRepository`), `SecurityConfig` (JWT stateless, `@EnableMethodSecurity`, tắt `httpBasic`, Swagger bật theo `app.swagger.enabled`, fail-closed `app.security.jwt-secret`, CORS theo `app.cors.allowed-origins`), `JwtTokenProvider`, `JwtAuthFilter`.
-3. `application`: Use cases đăng ký, đăng nhập, KYC chủ xe/doanh nghiệp, CRUD xe điện (`VehicleService`), và implement `IdentityQueryPort` (đã có sẵn interface tại `com.carbonx.identity.api.IdentityQueryPort`).
-4. `api`: REST Controllers giữ đúng path tương thích Frontend (`/api/v1/auth/**`, `/api/v1/kyc/**`, `/api/v1/vehicles/**`) với `@PreAuthorize` chặt chẽ (tham khảo `docs/security/SECURITY_AUDIT.md`).
-5. `test`: Viết integration test kiểm tra `EV_OWNER` gọi `GET /api/v1/vehicles/list` phải trả `403 Forbidden`, và `mvn test -B` pass cả `ModuleBoundaryArchTest`.
+Triển khai hoàn chỉnh `backend/identity-service` khớp `V1__init_identity.sql`:
+1. Implement `IdentityCommandUseCase` và `IdentityQueryUseCase` (tách riêng CommandService `@Transactional` và QueryService `@Transactional(readOnly = true)`).
+2. Tích hợp `spring-boot-starter-oauth2-client` (Google OIDC callback chuyển sang URL fragment `#token=`) + phát hành/xác thực JWT stateless chứa `userId`, `email`, `role` (`ROLE_EV_OWNER`, `ROLE_COMPANY`, `ROLE_CVA`, `ROLE_ADMIN`).
+3. Cung cấp internal REST endpoints cho `mrv-service` gọi qua OpenFeign (`GET /api/v1/internal/companies/{id}`, `POST /api/v1/internal/vehicles/verify-plates`) và ghi `VehicleRegisteredEvent` vào `OutboxPort` -> Kafka.
+4. Viết test kiểm chứng RBAC (`403 Forbidden` khi `EV_OWNER` truy cập `/api/v1/vehicles/list`) và chạy `cd backend && mvn test -pl identity-service -am -B` xanh 100%.
 ```
 
 ---
 
-## Prompt 2 — Module `mrv` (Projects, Applications, CSV Upload, 8 Fraud Rules, AI Scoring)
+## Prompt 2 — `mrv-service` (`:8082`, DB `carbonx_mrv`, **Spring AI `ChatClient`** + **Resilience4j** + OpenFeign)
 
 ```text
-Hãy triển khai hoàn chỉnh Bounded Context `com.carbonx.mrv` khớp với `V2__init_mrv.sql` và `docs/diagrams/services/02-mrv-erd.png`.
-
-Yêu cầu chi tiết:
-1. `domain`: Entities `Project`, `ProjectApplication`, `EmissionReport`, `FraudAnalysis` kèm state machine chặt:
-   - `ProjectApplication`: `SUBMITTED` -> `CVA_APPROVED` / `NEEDS_REVISION` / `CVA_REJECTED` -> `ADMIN_APPROVED` / `ADMIN_REJECTED`.
-   - `EmissionReport`: `SUBMITTED` -> `CVA_APPROVED` / `CVA_REJECTED` -> `ADMIN_APPROVED` / `ADMIN_REJECTED` -> `CREDIT_ISSUED`.
-   - CẤM join sang bảng `companies`/`vehicles`; chỉ lưu `companyId`, `companyNameSnap`, `verifierId`.
-2. `application`:
-   - Gọi `IdentityQueryPort` (chỉ qua package `com.carbonx.identity.api`) để lấy tên công ty và kiểm tra biển số xe hợp lệ trong CSV.
-   - Chuyển 8 luật kiểm tra gian lận (`DQ1`..`DQ8`, tham khảo `backend/Market_carbon/.../analysis/rules/`) sang `com.carbonx.mrv.domain.rules`.
-   - Khi Admin duyệt `EmissionReport` (`ADMIN_APPROVED`), ghi `EmissionReportApprovedEvent` (đã có sẵn ở `com.carbonx.mrv.api`) vào `OutboxWriter` trong cùng `@Transactional`.
-3. `api`: REST Controllers `/api/v1/projects/**`, `/api/v1/project-applications/**`, `/api/v1/emission-reports/**` có `@PreAuthorize` cho từng vai `COMPANY`, `CVA`, `ADMIN`.
-4. `test`: Unit test state machine (chặn nhảy bước `SUBMITTED` -> `ADMIN_APPROVED`) + `mvn test -B` pass `ModuleBoundaryArchTest`.
+Triển khai hoàn chỉnh `backend/mrv-service` khớp `V1__init_mrv.sql`:
+1. Implement `MrvCommandUseCase` và `MrvQueryUseCase`, state machine duyệt 2 cấp (CVA -> Admin) cho `ProjectApplication` và `EmissionReport`, cùng 8 luật kiểm tra gian lận `DQ1`..`DQ8`.
+2. Implement `IdentityServiceClientPort` bằng `@FeignClient(name = "identity-service")` bọc `@CircuitBreaker` + `@Retry`.
+3. Implement `SpringAiScoringPort` bằng `org.springframework.ai.chat.client.ChatClient` (`spring-ai-openai-spring-boot-starter`):
+   - `evaluateEmissionReport` (`POST /api/v1/reports/{id}/ai-score` cho CVA): gắn `@CircuitBreaker(name = "aiScoring", fallbackMethod = "fallbackRuleScore")` và `@Bulkhead(name = "aiScoring")` — khi LLM lỗi/timeout tự động trả điểm fallback tính từ 8 luật `DQ1..DQ8`.
+   - `chatWithAssistant` (`POST /api/v1/ai/chat` cho `AiChatWidget`): gắn `@CircuitBreaker(name = "aiChat")` + `@RateLimiter(name = "aiChat")`.
+4. Khi Admin duyệt báo cáo, ghi `EmissionReportApprovedEvent` vào `OutboxPort` và relay lên Kafka topic `mrv.events`.
+5. Chạy `cd backend && mvn test -pl mrv-service -am -B` xanh 100%.
 ```
 
 ---
 
-## Prompt 3 — Module `registry` (Credit Batches, Credit Holdings 80/20 Split, Serial Movements, Retirement)
+## Prompt 3 — `registry-service` (`:8083`, DB `carbonx_registry` + Redis Cache + 80/20 `CreditHoldings`)
 
 ```text
-Hãy triển khai hoàn chỉnh Bounded Context `com.carbonx.registry` khớp với `V3__init_registry.sql` và `docs/diagrams/services/03-registry-erd.png`.
-
-MỤC TIÊU CỐT LÕI (giải quyết bài toán lô 100 tín chỉ -> bán 80 giữ lại 20 để dùng):
-1. `domain`:
-   - `CreditBatch` (BẤT BIẾN sau khi tạo): tính theo công thức VM0038 `(totalEnergy * emissionFactor / 1000) * (1 - buffer - uncertainty - leakage)`, sinh `batchCode` và dải serial `serialStart..serialEnd`.
-   - `CreditHolding` (sở hữu theo công ty trên 1 lô): có `availableQty`, `lockedQty`, `retiredQty`, `serialStart`, `serialEnd`, `@Version` + phương thức domain `lock(qty)`, `unlock(qty)`, `deductLocked(qty)`, `retire(qty)`.
-   - `CreditMovement`: sổ cái di chuyển bất biến (`ISSUE`, `LOCK`, `UNLOCK`, `TRANSFER_OUT`, `TRANSFER_IN`, `RETIRE`) ghi rõ `quantity` và `serialStart..serialEnd`.
-   - `RetirementCertificate`: sinh từ `CreditHolding` khi doanh nghiệp triệt tiêu phần còn lại (ví dụ 20 tín chỉ giữ lại).
-2. `application`:
-   - Listener nhận `EmissionReportApprovedEvent` (từ `OutboxEvent` với `eventType = "mrv.emission-report.approved"`) để phát hành 1 `CreditBatch` + 1 `CreditHolding` ban đầu cho `issuerCompanyId` + 1 `CreditMovement(ISSUE)` (idempotent theo `sourceReportId`).
-   - Implement `RegistryCommandPort` (đã có sẵn tại `com.carbonx.registry.api.RegistryCommandPort`):
-     - `lockCreditsForListing`: khoá `FOR UPDATE` trên `CreditHolding`, chuyển `availableQty -> lockedQty`, ghi `CreditMovement(LOCK)`.
-     - `transferSoldCredits`: trừ `lockedQty` của người bán, tạo hoặc cộng `CreditHolding` mới cho người mua trỏ cùng `batchId` kèm dải serial con chính xác, ghi `TRANSFER_OUT` + `TRANSFER_IN`.
-3. `api`: `/api/v1/credits/batches/**`, `/api/v1/credits/holdings/**`, `/api/v1/credits/retirements/**`.
-4. `test`: Test kịch bản: Phát hành lô 100 -> Lock 80 -> Bán 80 cho Company B -> Assert Company A còn đúng `availableQty = 20`, Company B có `availableQty = 80` cùng `batchId`, sau đó Company A triệt tiêu 20 còn lại thành công. Chạy `mvn test -B` pass 100%.
+Triển khai hoàn chỉnh `backend/registry-service` khớp `V1__init_registry.sql`:
+1. Kafka Consumer lắng nghe `EmissionReportApprovedEvent` (idempotent theo `sourceReportId`) để phát hành bất biến `CreditBatch` theo công thức VM0038 + tạo `CreditHolding` gốc + `CreditMovement(ISSUE)`.
+2. Implement `RegistryCommandUseCase` và `RegistryQueryUseCase` (kết hợp Redis cache cho tra cứu nhanh `BatchProvenanceView`):
+   - Giải quyết bài toán **Lô 100 -> Lock 80 -> Bán 80 cho Buyer Holding (`000001..000080`), giữ lại 20 ở Seller Holding (`000081..000100`) để Triệt tiêu**.
+   - Cung cấp `compensateReleaseLockedCredits` cho bước bù trừ của Order Saga.
+3. Test kịch bản 100 -> 80/20 + xuất PDF chứng chỉ triệt tiêu trên Testcontainers MySQL 8; chạy `cd backend && mvn test -pl registry-service -am -B` xanh 100%.
 ```
 
 ---
 
-## Prompt 4 — Module `trading` (Market Listings & Luồng Mua Tức Thì 1 Bước)
+## Prompt 4 — `trading-service` (`:8084`, DB `carbonx_trading` + **Order Saga Orchestrator**)
 
 ```text
-Hãy triển khai hoàn chỉnh Bounded Context `com.carbonx.trading` khớp với `V4__init_trading.sql` và `docs/diagrams/services/04-trading-erd.png`.
-
-Yêu cầu nghiệp vụ đã chốt trong MASTER-PLAN.md:
-- Luồng mua tín chỉ bằng ví là **THANH TOÁN TỨC THÌ 1 BƯỚC** (bỏ trạng thái `PENDING` thừa).
-- Khi gọi `POST /api/v1/orders` (bắt buộc header `Idempotency-Key` hoặc tự sinh theo request):
-  1. Kiểm tra `idempotencyKey` trong `trade_orders` — nếu đã tồn tại thì trả lại đúng đơn đã khớp (idempotent).
-  2. Khoá `MarketListing` bằng `@Lock(PESSIMISTIC_WRITE)` (`FOR UPDATE`), kiểm tra `availableQty >= quantity` và `buyerCompanyId != sellerCompanyId`.
-  3. Tính `grossAmount = unitPrice * quantity`, `platformFee = grossAmount * 0.05`, `netSellerAmount = grossAmount - platformFee` bằng `com.carbonx.shared.domain.Money`.
-  4. Gọi `LedgerSettlementPort.settleTradeOrder(...)` để trừ ví người mua & cộng ví người bán.
-  5. Gọi `RegistryCommandPort.transferSoldCredits(...)` để chuyển `CreditHolding` cho người mua.
-  6. Trừ `listing.availableQty`, lưu `TradeOrder(FINISHED)` và ghi `OrderSettledEvent` vào `OutboxWriter` trong cùng transaction.
-- Khi niêm yết (`POST /api/v1/marketplace/listings`): gọi `RegistryCommandPort.lockCreditsForListing(...)`. Khi huỷ niêm yết: gọi `RegistryCommandPort.releaseLockedCredits(...)`.
-- Test đồng thời bằng Testcontainers MySQL 8: bắn 8 thread song song vào cùng 1 `Idempotency-Key` hoặc cùng 1 `Listing` còn 1 tín chỉ -> đảm bảo chỉ khớp đúng 1 lần, không bán âm.
+Triển khai hoàn chỉnh `backend/trading-service` khớp `V1__init_trading.sql`:
+1. Implement `TradingCommandUseCase`, `TradingQueryUseCase`, và `OrderSagaRemotePorts` (qua `@FeignClient("ledger-service")` & `@FeignClient("registry-service")` bọc Resilience4j).
+2. `executeInstantBuyOrderSaga` (`POST /api/v1/orders` — thanh toán tức thì 1 bước cho người dùng):
+   - Bước 1: Kiểm tra `idempotencyKey` + khoá `MarketListing` (`FOR UPDATE`), tạo `ListingReservation(RESERVED)`.
+   - Bước 2: Gọi `ledger-service` trừ ví người mua & cộng ví người bán (`debitBuyerAndCreditSeller`). Nếu lỗi -> mở khoá `MarketListing` (`RELEASED`) và trả lỗi.
+   - Bước 3: Gọi `registry-service` chuyển `CreditHolding` sang người mua (`transferCreditsToBuyer`). Nếu lỗi -> gọi **Compensating Transaction** `compensateRefundWalletSettlement` ở `ledger-service` + mở khoá `MarketListing`!
+   - Bước 4: Đánh dấu `ListingReservation(COMMITTED)`, lưu `TradeOrder(FINISHED)` và phát `OrderSettledEvent` vào Outbox -> Kafka.
+3. Viết test Saga thành công + test Saga kích hoạt giao dịch bù trừ hoàn tiền khi `registry-service` lỗi + test đồng thời 8 luồng; chạy `cd backend && mvn test -pl trading-service -am -B` xanh 100%.
 ```
 
 ---
 
-## Prompt 5 — Module `ledger` (Immutable Wallet Ledger, Withdrawals & Payout Provenance)
+## Prompt 5 — `ledger-service` (`:8085`, DB `carbonx_ledger` + Immutable Ledger + Payout Provenance)
 
 ```text
-Hãy triển khai hoàn chỉnh Bounded Context `com.carbonx.ledger` khớp với `V5__init_ledger_and_outbox.sql` và `docs/diagrams/services/05-ledger-erd.png`.
-
-MỤC TIÊU CỐT LÕI (giải quyết bài toán chủ xe biết tiền chia từ lô tín chỉ nào, ID nào):
-1. `domain`: Entities `Wallet`, `WalletTransaction` (append-only, KHÔNG có setter sửa số tiền), `BankAccount`, `Withdrawal`, `ProfitDistribution`, `PayoutItem`.
-2. `application`:
-   - Implement `LedgerSettlementPort.settleTradeOrder(...)`: khoá 2 `Wallet` theo **thứ tự `id` tăng dần** (`FOR UPDATE`) để tránh deadlock; kiểm tra `balanceUsd >= grossAmount`; ghi 2 dòng `WalletTransaction` (`ORDER_DEBIT`, `ORDER_CREDIT`) kèm `balanceBefore` / `balanceAfter` và `idempotencyKey`.
-   - `ProfitSharingService`: nhận danh sách đóng góp `(evOwnerId, kwh)` + `sourceReportId` + `creditBatchId` + `batchCode` + `serialRange`, tính `allocatedCredits` và `amountUsd`, chạy thread pool `profitPool` với `claimToken` để cộng vào ví từng chủ xe, lưu `walletTxId` vào `PayoutItem` và ghi `ProfitDistributedEvent` vào `OutboxWriter`.
-   - Endpoint truy vết cho Chủ xe: `GET /api/v1/wallet/transactions/{txId}/provenance` (hoặc đính kèm trong lịch sử ví) trả về chính xác `creditBatchId`, `batchCode`, `serialRange`, `sourceReportId`, `period`, `kwhContributed`, `allocatedCredits`.
-3. `test`: Testcontainers MySQL 8 kiểm chứng bất biến `sum(wallet_transactions) == wallet.balance_usd` dưới tải đồng thời + kiểm chứng truy vết ngược từ `WalletTransaction` về đúng `creditBatchId`.
+Triển khai hoàn chỉnh `backend/ledger-service` khớp `V1__init_ledger.sql`:
+1. Implement `LedgerCommandUseCase` và `LedgerQueryUseCase`:
+   - `settleOrderPayment` & `compensateOrderPayment`: khoá 2 ví theo thứ tự `id` tăng dần (`FOR UPDATE`) chống deadlock, ghi bất biến `WalletTransaction` kèm `balanceBefore`/`balanceAfter` và `idempotencyKey`.
+   - `executeProfitDistribution`: gọi Feign lấy đóng góp kWh từ `mrv-service` và mã lô/serial từ `registry-service`, chạy thread pool `profitPool` kèm `claimToken` cộng ví từng chủ xe, lưu đầy đủ `creditBatchId`, `batchCodeSnap`, `serialRangeSnap`, `sourceReportId` vào `PayoutItem` và phát `ProfitDistributedEvent`.
+   - `getTransactionProvenance`: trả về chính xác tiền chia từ lô tín chỉ nào, dải serial nào, báo cáo nào cho Chủ xe.
+   - Tích hợp cổng thanh toán VNPay (HMAC-SHA512) / Stripe / PayPal bọc `@CircuitBreaker` + `@Retry`.
+2. Test đối soát sổ cái & truy vết provenance bằng Testcontainers MySQL 8; chạy `cd backend && mvn test -pl ledger-service -am -B` xanh 100%.
 ```
 
 ---
 
-## Prompt 6 — Module `notification` (SSE Realtime + Outbox Consumer) & Đồng bộ Frontend
+## Prompt 6 — `notification-service` (`:8086`), JWT Filter trên `api-gateway` & Đồng bộ Frontend
 
 ```text
-1. Trong `com.carbonx.notification`:
-   - Nâng cấp `DomainEventNotificationListener` lắng nghe `mrv.emission-report.approved`, `trading.order.settled`, `ledger.profit.distributed` từ `OutboxEvent`, lưu vào bảng `notifications` và đẩy realtime qua `SseEmitter` (`GET /api/v1/notifications`, bọc `try/catch` an toàn khi client đóng tab).
-2. Trong `frontend/src/pages/company/CompanyOrdersPage.tsx` và `frontend/src/pages/MarketplacePage.tsx`:
-   - Cập nhật luồng mua khớp 1 bước: bấm "Mua ngay" gửi `Idempotency-Key` (UUID), hiển thị đơn `Hoàn tất` ngay lập tức, bỏ 2 nút `Hoàn tất` / `Huỷ đơn` thừa trên đơn ví.
-   - Trong `frontend/src/features/wallet/components/TransactionList.tsx`: hiển thị thêm badge nguồn gốc lô tín chỉ (`batchCode`, `allocatedCredits`, `kWh`) cho các giao dịch `PROFIT_PAYOUT`.
-3. Chạy `mvn test -B` và `cd frontend && npm run build && npm test`.
-```
-
----
-
-## Prompt 7 — Pha 2: Tách Microservices với Apache Kafka (KRaft) & Spring Cloud Gateway
-
-```text
-Chỉ chạy sau khi Prompt 1 -> Prompt 6 đều xanh 100%.
-
-1. Thêm service `kafka` (Apache Kafka KRaft mode, không cần Zookeeper) và `api-gateway` (Spring Cloud Gateway xác thực JWT và gắn header `X-User-Id`, `X-User-Role`, `X-Request-Trace`) vào `docker-compose.yml`.
-2. Tạo adapter `KafkaOutboxRelay implements DomainEventPublisher` (kích hoạt bằng `@Profile("kafka")`) bắn bản ghi từ bảng `outbox_events` lên các Kafka topic (`mrv.events`, `trading.events`, `ledger.events`).
-3. Bóc `notification` thành `backend/notification-service` độc lập (Kafka Consumer + SSE) và bóc `mrv` thành `backend/mrv-service` độc lập (CSV + 8 luật gian lận + AI scoring + Kafka Producer), định tuyến toàn bộ qua `api-gateway:8080`.
-4. Kiểm chứng toàn bộ hệ thống bằng `docker compose up --build` + xem distributed trace xuyên suốt `api-gateway -> core -> kafka -> notification-service` trên Jaeger (`http://localhost:16686`) và metrics trên Grafana (`http://localhost:3001`).
+1. Trong `backend/notification-service`: implement `NotificationEventConsumerPort` (`@KafkaListener` idempotent theo `eventId`) lưu bảng `notifications`, đẩy realtime qua `SseEmitter` và gửi Email qua `JavaMailSender`.
+2. Trong `backend/api-gateway`: thêm reactive `JwtAuthenticationGlobalFilter` kiểm tra chữ ký JWT tập trung tại Gateway và gắn header `X-User-Id`, `X-User-Role`, `X-Request-Trace` xuống 6 microservices.
+3. Trong `frontend/`: đồng bộ màn `CompanyOrdersPage.tsx` (luồng mua 1 bước kèm `Idempotency-Key`) và `TransactionList.tsx` (hiển thị nguồn gốc lô tín chỉ `batchCode` / `serialRange` cho Chủ xe).
+4. Chạy `cd backend && mvn clean test -B`, `cd frontend && npm run build && npm test`, và `docker compose up --build -d` kiểm tra toàn bộ hệ thống trên Eureka (`:8761`), Config Server (`:8888`), Gateway Swagger UI (`:8080/swagger-ui.html`), Jaeger (`:16686`) và Grafana (`:3001`).
 ```

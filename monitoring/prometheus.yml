@@ -3,7 +3,7 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
-  - job_name: "carbonx-backend"
+  - job_name: "carbonx-platform"
     metrics_path: "/actuator/prometheus"
     static_configs:
-      - targets: ["backend:8082"]
+      - targets: ["discovery-server:8761", "api-gateway:8080", "carbonx-backend:8082"]

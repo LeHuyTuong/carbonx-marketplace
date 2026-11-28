@@ -1,0 +1,30 @@
+{
+  "system": "CarbonX Microservices Platform",
+  "lang": "en",
+  "fe": { "name": "FE", "app": "React App" },
+  "servers": [
+    {
+      "name": "API Gateway",
+      "icon": "spring",
+      "layers": ["WebFluxRouter", "CircuitBreaker", "LoadBalancer", "SwaggerUI"]
+    },
+    {
+      "name": "Microservices Fleet",
+      "icon": "springboot",
+      "layers": ["Controller", "Service", "Repository", "Entity"],
+      "db": "MySQL"
+    }
+  ],
+  "thirdParty": [
+    { "name": "Eureka Registry", "from": "API Gateway", "protocol": "HTTP" },
+    { "name": "Config Server", "from": "API Gateway", "protocol": "HTTP" },
+    { "name": "Redis", "from": "Microservices Fleet", "db": true },
+    { "name": "Apache Kafka", "from": "Microservices Fleet", "db": true },
+    { "name": "Google OAuth", "from": "Microservices Fleet", "layer": "Controller", "protocol": "HTTPS" },
+    { "name": "Google Gemini", "from": "Microservices Fleet", "layer": "Service", "protocol": "HTTPS" },
+    { "name": "Stripe", "from": "Microservices Fleet", "layer": "Service", "protocol": "HTTPS" },
+    { "name": "PayPal", "from": "Microservices Fleet", "layer": "Service", "protocol": "HTTPS" },
+    { "name": "Prometheus", "from": "Microservices Fleet", "protocol": "HTTP" },
+    { "name": "Jaeger", "from": "Microservices Fleet", "protocol": "HTTP" }
+  ]
+}

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.3</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.carbonx</groupId>
+    <artifactId>carbonx-platform</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>carbonx-platform</name>
+    <description>CarbonX Cloud-Native Microservices — Spring Cloud + Eureka + Config/Bus + Gateway + OpenFeign + Resilience4j + Spring AI + Kafka + Redis + DDD/CQRS/Saga</description>
+
+    <modules>
+        <module>common-kernel</module>
+        <module>config-server</module>
+        <module>discovery-server</module>
+        <module>api-gateway</module>
+        <module>identity-service</module>
+        <module>mrv-service</module>
+        <module>registry-service</module>
+        <module>trading-service</module>
+        <module>ledger-service</module>
+        <module>notification-service</module>
+    </modules>
+
+    <properties>
+        <java.version>17</java.version>
+        <spring-cloud.version>2023.0.3</spring-cloud.version>
+        <spring-ai.version>1.0.0-M6</spring-ai.version>
+        <jjwt.version>0.11.5</jjwt.version>
+        <archunit.version>1.3.0</archunit.version>
+        <testcontainers.version>1.20.4</testcontainers.version>
+        <springdoc.version>2.6.0</springdoc.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.carbonx</groupId>
+                <artifactId>common-kernel</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>

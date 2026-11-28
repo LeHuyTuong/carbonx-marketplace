@@ -1,0 +1,62 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  config:
+    import: "optional:configserver:${CONFIG_SERVER_URI:http://localhost:8888}"
+  cloud:
+    gateway:
+      routes:
+        - id: identity-service
+          uri: lb://identity-service
+          predicates:
+            - Path=/api/v1/auth/**,/api/v1/kyc/**,/api/v1/vehicles/**,/api/v1/users/**
+        - id: mrv-service
+          uri: lb://mrv-service
+          predicates:
+            - Path=/api/v1/projects/**,/api/v1/project-applications/**,/api/v1/reports/**,/api/v1/ai/**
+        - id: registry-service
+          uri: lb://registry-service
+          predicates:
+            - Path=/api/v1/credits/**
+        - id: trading-service
+          uri: lb://trading-service
+          predicates:
+            - Path=/api/v1/marketplace/**,/api/v1/orders/**
+        - id: ledger-service
+          uri: lb://ledger-service
+          predicates:
+            - Path=/api/v1/wallet/**,/api/v1/payment/**,/api/v1/withdrawal/**,/api/v1/profit-sharing/**,/api/v1/companies/payout-formula
+        - id: notification-service
+          uri: lb://notification-service
+          predicates:
+            - Path=/api/v1/notifications/**
+
+springdoc:
+  swagger-ui:
+    urls:
+      - name: identity-service
+        url: /v3/api-docs/identity
+      - name: mrv-service
+        url: /v3/api-docs/mrv
+      - name: registry-service
+        url: /v3/api-docs/registry
+      - name: trading-service
+        url: /v3/api-docs/trading
+      - name: ledger-service
+        url: /v3/api-docs/ledger
+      - name: notification-service
+        url: /v3/api-docs/notification
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URI:http://localhost:8761/eureka/}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,gateway

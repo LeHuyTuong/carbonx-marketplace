@@ -1,0 +1,28 @@
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowSize: 20
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+  retry:
+    configs:
+      default:
+        maxAttempts: 3
+        waitDuration: 500ms
+  ratelimiter:
+    configs:
+      default:
+        limitForPeriod: 50
+        limitRefreshPeriod: 60s
+        timeoutDuration: 0s
+  bulkhead:
+    configs:
+      default:
+        maxConcurrentCalls: 25
+        maxWaitDuration: 0ms
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
