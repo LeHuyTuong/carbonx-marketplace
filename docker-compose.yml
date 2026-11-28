@@ -1,100 +1,89 @@
-# P0-A (N5): credentials moved to environment injection (read from a local .env file,
-# see .env.example). Values that were previously committed must be considered exposed
-# and rotated — see docs/architecture/P0_A_SECRET_ROTATION.md.
 services:
-  db:
+  mysql:
     image: mysql:8.0
-    container_name: mysql-db
+    container_name: carbonx-mysql
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
-      MYSQL_DATABASE: core_ccm
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-carbonx}
+    ports:
+      - "${MYSQL_PORT:-3307}:3306"
     volumes:
-      - db_data:/var/lib/mysql
+      - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 10
-    networks: [backend]
-    ports:
-      - "3307:3306"
-    restart: unless-stopped
 
-  be:
+  backend:
     build:
-      context: ./backend/Market_carbon
+      context: ./backend/carbonx-backend
       dockerfile: Dockerfile
-    image: api-image-sample:latest
+    container_name: carbonx-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
     environment:
-      SPRING_PROFILES_ACTIVE: local
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/core_ccm?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-carbonx}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
-
-      SERVER_PORT: 8082
-      SPRING_DATASOURCE_DRIVER_CLASS_NAME: com.mysql.cj.jdbc.Driver
-      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:?set SPRING_MAIL_USERNAME in .env}
-      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:?set SPRING_MAIL_PASSWORD in .env}
-      SPRING_MAIL_HOST: smtp.gmail.com
-      SPRING_MAIL_PORT: 587
-      SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH: "true"
-      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: "true"
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
-      # P0-B/B1: PaymentVerificationService (@Value) — server-side trust boundary
-      STRIPE_API_KEY: ${STRIPE_API_KEY:?set STRIPE_API_KEY in .env}
-      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:?set PAYPAL_CLIENT_ID in .env}
-      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:?set PAYPAL_CLIENT_SECRET in .env}
-      PAYPAL_MODE: ${PAYPAL_MODE:sandbox}
-      # Placeholder còn lại: không có biến nào trong .env thì backend không boot được
-      # ("Could not resolve placeholder ...").
-      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-carbonx-local}
-      AWS_S3_REGION: ${AWS_S3_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-local-access-key}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-local-secret-key}
-      AWS_S3_PUBLIC_BASE_URL: ${AWS_S3_PUBLIC_BASE_URL:-http://localhost:8082/files}
-      AI_GEMINI_API_KEY: ${AI_GEMINI_API_KEY:-local-dummy-key}
-      AI_GEMINI_MODEL: ${AI_GEMINI_MODEL:-gemini-2.5-pro}
-      AI_GEMINI_ENABLED: ${AI_GEMINI_ENABLED:-false}
-      AI_GEMINI_TIMEOUT_MS: ${AI_GEMINI_TIMEOUT_MS:-30000}
-      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_ID: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_ID:-dev-google-client-id}
-      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_SECRET: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GOOGLE_CLIENT_SECRET:-dev-google-client-secret}
-      TRADING_FEE: ${TRADING_FEE:-0.05}
-      PAYMENT_SUCCESS_URL: ${PAYMENT_SUCCESS_URL:-http://localhost:8082/api/v1/payment/success}
-      PAYMENT_CANCEL_URL: ${PAYMENT_CANCEL_URL:-http://localhost:8082/api/v1/payment/cancel}
-      SWAGGER_TITLE: ${SWAGGER_TITLE:-CarbonX API}
-      SWAGGER_VERSION: ${SWAGGER_VERSION:-1.0.0}
-      SWAGGER_DESCRIPTION: ${SWAGGER_DESCRIPTION:-CarbonX carbon credit marketplace API}
-      SERVER_URL: ${SERVER_URL:-http://localhost:8082}
-      SERVER_DESCRIPTION: ${SERVER_DESCRIPTION:-CarbonX API}
-      
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
-      - "8082:8082"  
-    depends_on:
-      db:
-        condition: service_healthy
-    networks: [backend]
-    restart: unless-stopped
+      - "8082:8082"
 
-  fe:
+  frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        # Vite chỉ đọc biến VITE_* lúc build; apiClient dùng "/api/v1" để nginx
-        # proxy /api/ tới backend (network "backend", service "be").
-        VITE_API_BASE: /api/v1
-    image: carbonx-fe:latest
-    networks:
+    container_name: carbonx-frontend
+    restart: unless-stopped
+    depends_on:
       - backend
     ports:
-      - "3000:80"  
-    depends_on:
-      - be 
-    restart: unless-stopped
+      - "3000:80"
 
-networks:
-  backend:
-    driver: bridge
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    container_name: carbonx-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: carbonx-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: carbonx-grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
 
 volumes:
-  db_data:
+  mysql_data:
+  grafana_data:
