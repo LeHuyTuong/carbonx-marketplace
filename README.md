@@ -59,40 +59,24 @@ Spring Boot 3.3 / Java 17 / MySQL 8 · React 19 + Vite 6 + Tailwind 4 + TypeScri
 5. Doanh nghiệp chia doanh thu: tiền chuyển vào ví từng chủ xe theo kWh sạc thực tế, kèm bảng chi tiết từng người.
 6. Chủ xe rút tiền, Admin duyệt lệnh rút.
 
-## Kiến trúc
+## Kiến trúc Microservices & BFF (Cloud-Native Spring Cloud)
 
-```mermaid
-flowchart LR
-  subgraph FE["Frontend (React 19 + Vite + Tailwind + Nginx)"]
-    UI["4 Role Dashboards\nEV Owner · Company · CVA · Admin"]
-  end
-  subgraph BE["Backend (Spring Boot 3.3 / Java 17)"]
-    SEC["JWT + RBAC (@PreAuthorize)"]
-    SVC["Domain Services\nMRV · Issuance · Orders · ProfitSharing"]
-    POOL["profitPool (Async)\nFOR UPDATE + Idempotency"]
-  end
-  subgraph DB["MySQL 8"]
-    DATA["Ledger (WalletTransaction)\nCredits · Reports · Orders"]
-  end
-  subgraph EXT["Third Party"]
-    PAY["VNPay · Stripe · PayPal"]
-    AI["Gemini AI · S3 Storage"]
-  end
+![CarbonX Cloud-Native Microservices + BFF Architecture](docs/diagrams/microservices-architecture.png)
 
-  UI -- "HTTPS / REST + SSE" --> SEC --> SVC --> POOL --> DATA
-  SVC --> PAY
-  SVC --> AI
-```
+- **2 Kênh Client & Tầng BFF không trạng thái (Stateless BFF)**:
+  - `web-bff` (`:8091`, `/api/web/**`): Tổng hợp song song dữ liệu đa dịch vụ cho **Web SPA** (`React 19`) kèm cơ chế suy giảm êm (`partialData = true`).
+  - `mobile-bff` (`:8092`, `/api/mobile/**`): Tối ưu payload JSON gọn nhẹ cho **Mobile App** (`React Native / Flutter`) trên mạng 4G/5G, gộp 1 request màn hình chính, cấp **Presigned S3 URL** chụp ảnh KYC/cà-vẹt xe trực tiếp từ camera và quản lý **FCM / APNs Push Token**.
+- **Hạ tầng Phân tán Spring Cloud (`2023.0.3`)**: `discovery-server` (**Netflix Eureka** `:8761`), `config-server` (**Spring Cloud Config + Bus Kafka** `:8888`), `api-gateway` (**Spring Cloud Gateway WebFlux** `:8080` + LoadBalancer + Swagger UI tập trung), giao tiếp nội bộ qua **OpenFeign + Resilience4j** (`CircuitBreaker`, `Retry`, `Bulkhead`, `RateLimiter`).
+- **6 Domain Microservices (Database-per-Service + Flyway + DDD/CQRS + Saga + Outbox)**: `identity-service` (`:8081`), `mrv-service` (`:8082` tích hợp **Spring AI `ChatClient`**), `registry-service` (`:8083` + **Redis** cache + tách `CreditHoldings` 80/20), `trading-service` (`:8084` **Order Saga** + Compensating Transactions), `ledger-service` (`:8085` sổ cái bất biến + truy vết `PayoutItems`), `notification-service` (`:8086` **Apache Kafka** + SSE + Mail + Push).
 
 ```
-frontend/                  React SPA (Vite, Tailwind, React Query, Zustand)
-  src/app                  router, layout theo vai trò
-  src/pages                màn hình theo vai trò (admin / company / cva / ev)
-  src/features             hooks + component theo nghiệp vụ (wallet, payouts, marketplace…)
-  src/shared               API client, guard phân quyền, store, tiện ích
-backend/Market_carbon/     Spring Boot API (controller → service → repository)
-docker-compose.yml         MySQL + backend + frontend (Nginx)
-docs/                      kiến trúc, kiểm toán bảo mật, sơ đồ, ảnh & video demo
+backend/                   Maven Multi-Module Reactor (12 modules: Eureka, Config, Gateway, 2 BFFs, 6 Services)
+frontend/                  React 19 SPA (Vite 6, Tailwind v4, React Query, Zustand)
+config-repo/               Cấu hình tập trung cho Spring Cloud Config Server
+k8s/                       Manifest Kubernetes (ConfigMap, Secret, Deployment, Service) cho GKE / Cloud Run
+monitoring/                Prometheus, Grafana provisioning & MySQL 6-DB init script
+docker-compose.yml         Full stack: 6-DB MySQL 8 + Redis + Kafka KRaft + Spring Cloud + BFF + Observability
+docs/                      Kiến trúc, ERD từng service, kiểm toán bảo mật, prompt triển khai, ảnh & video demo
 ```
 
 ## Tài liệu kỹ thuật & Kiểm toán (`docs/`)

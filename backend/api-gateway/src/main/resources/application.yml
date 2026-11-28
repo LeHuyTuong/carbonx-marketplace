@@ -9,6 +9,14 @@ spring:
   cloud:
     gateway:
       routes:
+        - id: web-bff
+          uri: lb://web-bff
+          predicates:
+            - Path=/api/web/**
+        - id: mobile-bff
+          uri: lb://mobile-bff
+          predicates:
+            - Path=/api/mobile/**
         - id: identity-service
           uri: lb://identity-service
           predicates:
@@ -37,6 +45,10 @@ spring:
 springdoc:
   swagger-ui:
     urls:
+      - name: web-bff
+        url: /v3/api-docs/web-bff
+      - name: mobile-bff
+        url: /v3/api-docs/mobile-bff
       - name: identity-service
         url: /v3/api-docs/identity
       - name: mrv-service

@@ -18,38 +18,39 @@ Task nào đi ngược file này thì dừng lại và hỏi.
 
 ## 2. Công nghệ
 ### Quyết định
-- Core & Hạ tầng Spring Cloud (`2023.0.3` trên Java 17 + Spring Boot `3.3.3`): Maven Multi-Module 10 modules gồm `common-kernel`, `config-server` (`:8888` + `Spring Cloud Bus` qua Kafka + `@RefreshScope`), `discovery-server` (`:8761` Netflix Eureka), `api-gateway` (`:8080` Spring Cloud Gateway WebFlux + `Spring Cloud LoadBalancer` + Swagger UI tập trung `springdoc-openapi-starter-webflux-ui`), cùng 6 domain microservices (`identity-service` `:8081`, `mrv-service` `:8082`, `registry-service` `:8083`, `trading-service` `:8084`, `ledger-service` `:8085`, `notification-service` `:8086`).
-- Giao tiếp, Chịu lỗi & AI: Đồng bộ qua **Spring Cloud OpenFeign** bọc **Resilience4j** (Circuit Breaker, Retry, Rate Limiter, Bulkhead — thay thế hoàn toàn Hystrix/Ribbon); Bất đồng bộ qua **Apache Kafka (KRaft)**; Cache dùng **Redis**; Tích hợp AI bằng **Spring AI `ChatClient`** (`spring-ai-openai-spring-boot-starter`) cho CVA Suggest Score và AI Chat Widget.
+- Core & Hạ tầng Spring Cloud (`2023.0.3` trên Java 17 + Spring Boot `3.3.3`): Maven Multi-Module **12 modules** gồm `common-kernel`, `config-server` (`:8888` + `Spring Cloud Bus` qua Kafka + `@RefreshScope`), `discovery-server` (`:8761` Netflix Eureka), `api-gateway` (`:8080` Spring Cloud Gateway WebFlux + `Spring Cloud LoadBalancer` + Swagger UI tập trung `springdoc-openapi-starter-webflux-ui`), **2 tầng BFF không trạng thái (`web-bff` `:8091` cho Web SPA, `mobile-bff` `:8092` cho Mobile App)**, cùng 6 domain microservices (`identity-service` `:8081`, `mrv-service` `:8082`, `registry-service` `:8083`, `trading-service` `:8084`, `ledger-service` `:8085`, `notification-service` `:8086`).
+- Giao tiếp, Chịu lỗi & AI: Đồng bộ qua **Spring Cloud OpenFeign** bọc **Resilience4j** (Circuit Breaker, Retry, Rate Limiter, Bulkhead — thay thế hoàn toàn Hystrix/Ribbon); Bất đồng bộ qua **Apache Kafka (KRaft)**; Cache dùng **Redis**; Tích hợp AI bằng **Spring AI `ChatClient`** (`spring-ai-openai-spring-boot-starter`) cho CVA Suggest Score và AI Chat Widget; Push Notification di động qua **FCM / APNs**.
 - Đóng gói & Điều phối Cloud: Multi-stage `Dockerfile` với base image bảo mật **Google Distroless (`gcr.io/distroless/java17-debian12:nonroot`)**, kèm bộ manifest **Kubernetes (`k8s/configmap.yaml`, `secret.yaml`, `deployment.yaml`, `service.yaml`)** sẵn sàng cho GKE / Cloud Run.
 ### Lý do
-- Áp dụng đầy đủ 6 trụ cột công nghệ chuẩn Spring Cloud, Kafka, Redis, Spring AI, Distroless và Kubernetes giải quyết trọn vẹn bài toán định tuyến, phát hiện dịch vụ, cấu hình nóng, chịu lỗi và vận hành cloud-native.
+- Áp dụng đầy đủ 6 trụ cột công nghệ chuẩn Spring Cloud, BFF đa thiết bị, Kafka, Redis, Spring AI, Distroless và Kubernetes giải quyết trọn vẹn bài toán định tuyến, phát hiện dịch vụ, tối ưu băng thông Mobile/Web, cấu hình nóng, chịu lỗi và vận hành cloud-native.
 ### Luật
-- Luôn đóng gói mọi microservice bằng multi-stage Dockerfile trên nền `gcr.io/distroless/java17-debian12:nonroot`.
+- Luôn đóng gói mọi microservice và BFF bằng multi-stage Dockerfile trên nền `gcr.io/distroless/java17-debian12:nonroot`.
 - Không bao giờ dùng thư viện đã ngừng phát triển như Netflix Hystrix hoặc Ribbon; bắt buộc dùng `Resilience4j` và `Spring Cloud LoadBalancer`.
 
 ## 3. Design pattern
 ### Quyết định
-- Pattern đã chọn: **Database-per-Service** + **Pragmatic DDD** + **Logical CQRS** (`*CommandUseCase` tách biệt `*QueryUseCase`) + **Saga Pattern** (Orchestration kết hợp Compensating Transactions) + **Transactional Outbox** + **Resilience4j** (Circuit Breaker, Retry, Rate Limiter, Bulkhead) + Idempotency Key.
-- Áp tới mức nào: Giao dịch liên service (Mua tín chỉ giữa `trading`, `registry`, `ledger`) dùng Order Saga + OpenFeign/Kafka + Idempotency Key + Outbox; luồng trong nội bộ 1 service (`Wallet`, `CreditHolding`) dùng khoá bi quan `FOR UPDATE` + 1 DB transaction cục bộ; mọi lời gọi sang service khác, Spring AI hoặc cổng thanh toán bắt buộc bọc Resilience4j.
-- Khi sập: Bước sau trong Order Saga thất bại thì kích hoạt giao dịch bù trừ hoàn khoá `CreditHolding` / hoàn tiền ví; LLM lỗi thì Circuit Breaker `aiScoring` mở mạch và trả điểm fallback từ 8 luật gian lận; sự kiện Outbox lỗi quá 5 lần chuyển sang `DEAD_LETTER` và phát cảnh báo cho đội vận hành.
+- Pattern đã chọn: **BFF (Backend for Frontend)** + **Database-per-Service** + **Pragmatic DDD** + **Logical CQRS** (`*CommandUseCase` tách biệt `*QueryUseCase`) + **Saga Pattern** (Orchestration kết hợp Compensating Transactions) + **Transactional Outbox** + **Resilience4j** (Circuit Breaker, Retry, Rate Limiter, Bulkhead) + Idempotency Key.
+- Áp tới mức nào: Tầng **BFF** tách riêng `web-bff` (`/api/web/**` gom bảng điều khiển đa service giàu dữ liệu cho Admin/CVA/Company) và `mobile-bff` (`/api/mobile/**` nén payload JSON gọn nhẹ cho mạng 4G/5G, gộp 1 request màn hình chính Chủ xe điện, cấp Presigned URL chụp ảnh KYC/xe lên S3 và đăng ký FCM/APNs token); giao dịch liên service (Mua tín chỉ giữa `trading`, `registry`, `ledger`) dùng Order Saga + OpenFeign/Kafka + Idempotency Key + Outbox; luồng trong nội bộ 1 service (`Wallet`, `CreditHolding`) dùng khoá bi quan `FOR UPDATE` + 1 DB transaction cục bộ; mọi lời gọi từ BFF hoặc giữa các service bắt buộc bọc Resilience4j.
+- Khi sập: Một service phụ trên màn tổng quan chậm/lỗi thì BFF trả dữ liệu từng phần (graceful degradation) thay vì làm trắng toàn màn hình Mobile/Web; bước sau trong Order Saga thất bại thì kích hoạt giao dịch bù trừ hoàn khoá `CreditHolding` / hoàn tiền ví; LLM lỗi thì Circuit Breaker `aiScoring` mở mạch và trả điểm fallback từ 8 luật gian lận; sự kiện Outbox lỗi quá 5 lần chuyển sang `DEAD_LETTER` và phát cảnh báo cho đội vận hành.
 ### Lý do
-- Kết hợp Saga, Outbox, CQRS và Resilience4j giải quyết triệt để bài toán giao dịch phân tán không có 2PC và ngăn chặn lỗi sập dây chuyền (Cascading Failure).
+- Kết hợp BFF, Saga, Outbox, CQRS và Resilience4j vừa triệt tiêu hiện tượng over-fetching/chatty requests trên ứng dụng Mobile mà không làm phình `api-gateway`, vừa đảm bảo giao dịch phân tán an toàn và chống lỗi sập dây chuyền (Cascading Failure).
 ### Luật
-- Luôn tách riêng interface `*CommandUseCase` và `*QueryUseCase` trong gói `application.port.in` của mỗi microservice.
+- Luôn tách riêng interface `*CommandUseCase` và `*QueryUseCase` trong gói `application.port.in` của mỗi microservice và mỗi BFF.
+- Không bao giờ cấp cơ sở dữ liệu riêng hay đặt luật nghiệp vụ lõi (tính tiền, phát hành tín chỉ, duyệt MRV) bên trong `web-bff` hoặc `mobile-bff`.
 - Luôn định nghĩa giao dịch bù trừ (compensating action) và `Idempotency-Key` cho mọi bước thay đổi trạng thái trong Saga.
 - Luôn bọc `Resilience4j` kèm fallback cho mọi `@FeignClient`, lời gọi Spring AI và cổng thanh toán bên ngoài.
 - Không bao giờ để hai microservice đọc hoặc ghi chung một cơ sở dữ liệu vật lý.
 
 ## 4. UI
 ### Quyết định
-- Giữ nguyên bộ giao diện React 19 + Tailwind CSS v4 đã chuẩn hoá theo 4 vai trò (Sidebar phân nhóm, Topbar Breadcrumb, `FileDropzone`, `ConfirmDialog`, KPI kèm đơn vị, biểu đồ Recharts).
+- Phục vụ 2 kênh giao diện độc lập qua tầng BFF riêng: **Web SPA** (React 19 + Tailwind CSS v4 cho đầy đủ 4 vai trò Admin, CVA, Company, EV Owner — Sidebar phân nhóm, Topbar Breadcrumb, `FileDropzone`, `ConfirmDialog`, KPI kèm đơn vị, biểu đồ Recharts) và **Mobile App** (React Native / Flutter chuyên biệt cho Chủ xe điện — theo dõi số dư ví & nguồn gốc lô tín chỉ chia tiền, chụp ảnh giấy tờ KYC/cà-vẹt xe bằng camera, nhận Push Notification tức thời).
 - Cập nhật màn hình `/marketplace` và `/app/company/orders` khớp luồng mua tức thì 1 bước (bỏ nút `Hoàn tất` / `Huỷ đơn` trên đơn thanh toán ví).
 - Tài liệu và giao diện người dùng giữ nhất quán tiếng Việt.
 ### Lý do
-- Giao diện hiện tại đã đạt 0 lỗi trên `ui-audit` và phản ánh đúng 4 vai trò nghiệp vụ, chỉ cần đồng bộ lại màn hình đơn mua theo flow mới.
+- Nhu cầu trải nghiệm giữa màn hình quản trị/kiểm toán lớn trên Web (bảng dữ liệu rộng, xuất CSV/PDF) và ứng dụng di động Chủ xe ngoài đường (mạng 4G chập chờn, thao tác 1 chạm, camera, push notification) khác biệt hoàn toàn nên cần cặp UI + BFF chuyên biệt.
 ### Luật
-- Luôn dùng `ConfirmDialog` và `FileDropzone` dùng chung cho thao tác xác nhận phá huỷ và tải tệp.
-- Không bao giờ bắt người dùng nhập tay mã ID nội bộ của cơ sở dữ liệu trên giao diện.
+- Luôn dùng `ConfirmDialog` và `FileDropzone` dùng chung cho thao tác xác nhận phá huỷ và tải tệp trên Web.
+- Không bao giờ bắt người dùng nhập tay mã ID nội bộ của cơ sở dữ liệu trên giao diện Web hay Mobile.
 
 ## 5. Dữ liệu và quy ước
 ### Quyết định
@@ -98,14 +99,14 @@ Task nào đi ngược file này thì dừng lại và hỏi.
 
 ## 9. Ranh giới domain và chia việc
 ### Quyết định
-- Tách thành **6 Microservices độc lập (Database-per-Service)**: `identity-service` (`carbonx_identity`), `mrv-service` (`carbonx_mrv`), `registry-service` (`carbonx_registry` + Redis cache), `trading-service` (`carbonx_trading`), `ledger-service` (`carbonx_ledger`), `notification-service` (`carbonx_notification`), cùng thư viện hợp đồng nhẹ `common-kernel` (`Money`, `SerialRange`, `DomainEvent`, `OutboxPort`, `CleanCodeArchTest`).
-- Mỗi microservice tuân thủ đúng 4 gói DDD: `api` (REST Controllers + Feign Contracts), `application` (`port.in` CQRS `*CommandUseCase` / `*QueryUseCase` + `port.out`), `domain` (Aggregates + Value Objects), `infrastructure` (JPA, Kafka, Redis, External Adapters).
-- Giao tiếp đồng bộ liên service đi qua `@FeignClient` + `Spring Cloud LoadBalancer` + `Resilience4j`; giao tiếp bất đồng bộ đi qua `OutboxPort` → **Apache Kafka**.
+- Tách thành **2 tầng BFF không trạng thái (`web-bff` `:8091`, `mobile-bff` `:8092`)** đứng trước **6 Microservices nghiệp vụ độc lập (Database-per-Service)**: `identity-service` (`carbonx_identity`), `mrv-service` (`carbonx_mrv`), `registry-service` (`carbonx_registry` + Redis cache), `trading-service` (`carbonx_trading`), `ledger-service` (`carbonx_ledger`), `notification-service` (`carbonx_notification`), cùng thư viện hợp đồng nhẹ `common-kernel` (`Money`, `SerialRange`, `DomainEvent`, `OutboxPort`, `CleanCodeArchRules`).
+- Mỗi microservice tuân thủ đúng 4 gói DDD: `api` (REST Controllers + Feign Contracts), `application` (`port.in` CQRS `*CommandUseCase` / `*QueryUseCase` + `port.out`), `domain` (Aggregates + Value Objects), `infrastructure` (JPA, Kafka, Redis, External Adapters); riêng `web-bff` và `mobile-bff` chỉ giữ `api`, `application` (`port.in` / `port.out`) và `infrastructure.client` (`@FeignClient`), không có DB riêng.
+- Giao tiếp từ BFF xuống domain services và giao tiếp đồng bộ liên service đi qua `@FeignClient` + `Spring Cloud LoadBalancer` + `Resilience4j`; giao tiếp bất đồng bộ đi qua `OutboxPort` → **Apache Kafka**.
 ### Lý do
-- Mỗi microservice là một đơn vị build, deploy và sở hữu DB riêng biệt giúp chia việc độc lập hoàn toàn và scale riêng từng điểm nóng (như `mrv-service` hay `trading-service`).
+- Tách tầng BFF theo thiết bị (Web vs Mobile) khỏi 6 domain microservices giúp đội Mobile/Frontend chủ động thay đổi cấu trúc màn hình mà không đụng vào hợp đồng domain hay CSDL của các service lõi.
 ### Luật
-- Không bao giờ cho phép một microservice phụ thuộc Maven trực tiếp vào microservice khác (chỉ được dùng `common-kernel` và hợp đồng REST/Kafka).
-- Không bao giờ đưa logic nghiệp vụ đặc thù của một service vào `common-kernel`.
+- Không bao giờ cho phép một microservice hoặc BFF phụ thuộc Maven trực tiếp vào microservice khác (chỉ được dùng `common-kernel` và hợp đồng REST/Kafka).
+- Không bao giờ đưa logic nghiệp vụ đặc thù của một service vào `common-kernel` hay vào tầng BFF.
 
 ## 10. Vận hành sự cố
 ### Quyết định

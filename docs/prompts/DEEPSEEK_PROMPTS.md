@@ -1,14 +1,17 @@
-# Bộ Prompt Triển Khai CarbonX 10-Module Microservices (Dành cho DeepSeek)
+# Bộ Prompt Triển Khai CarbonX 12-Module Microservices + BFF (Dành cho DeepSeek)
 
-> **Kiến trúc đã dựng sẵn**: Maven Multi-Module Reactor 10 modules tại `backend/`:
+> **Kiến trúc đã dựng sẵn**: Maven Multi-Module Reactor **12 modules** (`13 reactor items`) tại `backend/`:
 > - Hạ tầng Spring Cloud (`2023.0.3`): `common-kernel`, `config-server` (`:8888` + Spring Cloud Bus Kafka), `discovery-server` (`:8761` Netflix Eureka), `api-gateway` (`:8080` WebFlux + LoadBalancer + Resilience4j + Swagger UI tập trung).
+> - **2 tầng Backend-for-Frontend không trạng thái (Stateless BFF)**:
+>   - `web-bff` (`:8091`, `/api/web/**`): gom dữ liệu tổng quan đa service song song cho Web SPA (Admin, CVA, Company, EV Owner) kèm graceful degradation (`partialData=true`).
+>   - `mobile-bff` (`:8092`, `/api/mobile/**`): tối ưu băng thông 4G/5G cho ứng dụng Mobile Chủ xe điện (1 request Home duy nhất, cursor pagination, cấp Presigned URL chụp ảnh KYC/cà-vẹt xe lên thẳng S3, đăng ký FCM/APNs push token).
 > - 6 Microservices độc lập (**Database-per-Service** + Flyway + DDD + Logical CQRS + OpenFeign + Resilience4j + Kafka Outbox + Distroless Dockerfile):
 >   1. `identity-service` (`:8081`, DB `carbonx_identity`, OAuth2 Google + JWT)
 >   2. `mrv-service` (`:8082`, DB `carbonx_mrv`, Spring AI `ChatClient` + 8 Fraud Rules)
 >   3. `registry-service` (`:8083`, DB `carbonx_registry` + Redis Cache + 80/20 `CreditHoldings`)
 >   4. `trading-service` (`:8084`, DB `carbonx_trading` + Order Saga Orchestrator + Compensating Transactions)
 >   5. `ledger-service` (`:8085`, DB `carbonx_ledger` + Immutable `WalletTransactions` + `PayoutItems` Provenance)
->   6. `notification-service` (`:8086`, DB `carbonx_notification` + Kafka Consumer + SSE Realtime + Email)
+>   6. `notification-service` (`:8086`, DB `carbonx_notification` + Kafka Consumer + SSE Realtime + Email + FCM/APNs Push)
 > - Đóng gói & K8s: `Dockerfile` Distroless (`gcr.io/distroless/java17-debian12:nonroot`), `docker-compose.yml`, `k8s/{configmap,secret,deployment,service}.yaml`.
 
 ---
@@ -31,7 +34,7 @@ LUẬT CLEAN CODE & KIẾN TRÚC BẮT BUỘC (`ServiceArchitectureTest` chạy 
 - Tầng `..domain..` thuần khiết, CẤM import `..api..` hoặc `..infrastructure..`.
 - CẤM `@Autowired` field injection (chỉ dùng Constructor Injection `@RequiredArgsConstructor`), CẤM `System.out`/`printStackTrace`.
 - Mọi `@FeignClient`, lời gọi `Spring AI ChatClient`, và cổng thanh toán phải bọc `Resilience4j` (`@CircuitBreaker`, `@Retry`, `@RateLimiter`, `@Bulkhead`) kèm hàm fallback rõ ràng.
-- Sau mỗi prompt, bắt buộc chạy `cd backend && mvn test -B` xanh 10/10 modules trước khi báo hoàn tất.
+- Sau mỗi prompt, bắt buộc chạy `cd backend && mvn test -B` xanh 12/12 modules trước khi báo hoàn tất.
 ```
 
 ---
@@ -112,4 +115,19 @@ Triển khai hoàn chỉnh `backend/ledger-service` khớp `V1__init_ledger.sql`
 2. Trong `backend/api-gateway`: thêm reactive `JwtAuthenticationGlobalFilter` kiểm tra chữ ký JWT tập trung tại Gateway và gắn header `X-User-Id`, `X-User-Role`, `X-Request-Trace` xuống 6 microservices.
 3. Trong `frontend/`: đồng bộ màn `CompanyOrdersPage.tsx` (luồng mua 1 bước kèm `Idempotency-Key`) và `TransactionList.tsx` (hiển thị nguồn gốc lô tín chỉ `batchCode` / `serialRange` cho Chủ xe).
 4. Chạy `cd backend && mvn clean test -B`, `cd frontend && npm run build && npm test`, và `docker compose up --build -d` kiểm tra toàn bộ hệ thống trên Eureka (`:8761`), Config Server (`:8888`), Gateway Swagger UI (`:8080/swagger-ui.html`), Jaeger (`:16686`) và Grafana (`:3001`).
+```
+
+---
+
+## Prompt 7 — Tầng BFF Đa Thiết Bị: `web-bff` (`:8091`) & `mobile-bff` (`:8092`)
+
+```text
+Triển khai 2 module BFF không trạng thái (TUYỆT ĐỐI KHÔNG thêm JPA/@Entity/Database vào BFF — `ServiceArchitectureTest` sẽ chặn):
+1. Trong `backend/web-bff` (`/api/web/**`):
+   - Implement `WebBffQueryUseCase` & `WebBffCommandUseCase` kết hợp `WebDownstreamClientsPort` (`@FeignClient` tới `identity`, `mrv`, `registry`, `trading`, `ledger`).
+   - Dùng `CompletableFuture` song song + `@CircuitBreaker` / `@Bulkhead` để nếu 1 service thống kê phụ chậm/lỗi thì vẫn trả dashboard với `partialData = true` thay vì lỗi 500 toàn trang.
+2. Trong `backend/mobile-bff` (`/api/mobile/**`):
+   - Implement `MobileBffQueryUseCase` (`getEvOwnerHomeBootstrap` gom 1 lần gọi cho màn hình chính Mobile trên mạng 4G; `getCursorPayoutProvenanceFeed` phân trang theo cursor nhẹ pin).
+   - Implement `MobileBffCommandUseCase` cấp Presigned S3 PUT URL chụp ảnh CCCD/cà-vẹt xe từ camera, đăng ký FCM/APNs push token sang `notification-service` (`MobilePushNotificationPort`), và gửi yêu cầu rút tiền kèm `Idempotency-Key`.
+3. Chạy `cd backend && mvn test -pl web-bff,mobile-bff -am -B` xanh 100%.
 ```

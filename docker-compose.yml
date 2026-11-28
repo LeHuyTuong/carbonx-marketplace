@@ -66,6 +66,28 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     ports: ["8080:8080"]
 
+  web-bff:
+    build: { context: ./backend, dockerfile: web-bff/Dockerfile }
+    container_name: carbonx-web-bff
+    depends_on: [discovery-server, config-server]
+    environment:
+      EUREKA_URI: http://discovery-server:8761/eureka/
+      CONFIG_SERVER_URI: http://config-server:8888
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    ports: ["8091:8091"]
+
+  mobile-bff:
+    build: { context: ./backend, dockerfile: mobile-bff/Dockerfile }
+    container_name: carbonx-mobile-bff
+    depends_on: [discovery-server, config-server]
+    environment:
+      EUREKA_URI: http://discovery-server:8761/eureka/
+      CONFIG_SERVER_URI: http://config-server:8888
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+    ports: ["8092:8092"]
+
   identity-service:
     build: { context: ./backend, dockerfile: identity-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, discovery-server: { condition: service_started } }

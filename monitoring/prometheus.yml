@@ -6,4 +6,15 @@ scrape_configs:
   - job_name: "carbonx-platform"
     metrics_path: "/actuator/prometheus"
     static_configs:
-      - targets: ["discovery-server:8761", "api-gateway:8080", "carbonx-backend:8082"]
+      - targets:
+          - "discovery-server:8761"
+          - "config-server:8888"
+          - "api-gateway:8080"
+          - "web-bff:8091"
+          - "mobile-bff:8092"
+          - "identity-service:8081"
+          - "mrv-service:8082"
+          - "registry-service:8083"
+          - "trading-service:8084"
+          - "ledger-service:8085"
+          - "notification-service:8086"
