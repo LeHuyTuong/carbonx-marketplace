@@ -35,7 +35,7 @@ services:
     image: apache/kafka:3.8.0
     container_name: carbonx-kafka
     restart: unless-stopped
-    mem_limit: 384m
+    mem_limit: 512m
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -46,24 +46,24 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_LOG_RETENTION_BYTES: 104857600
-      KAFKA_HEAP_OPTS: "-Xms96m -Xmx160m"
+      KAFKA_HEAP_OPTS: "-Xms128m -Xmx256m"
     ports:
       - "9092:9092"
 
   discovery-server:
     build: { context: ./backend, dockerfile: discovery-server/Dockerfile }
     container_name: carbonx-eureka
-    mem_limit: 288m
+    mem_limit: 352m
     environment:
       MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
-      JAVA_TOOL_OPTIONS: &java_light_opts "-Xms24m -Xmx128m -XX:MaxMetaspaceSize=88m -XX:ReservedCodeCacheSize=32m -Xss256k -XX:+UseSerialGC"
+      JAVA_TOOL_OPTIONS: &java_light_opts "-Xms32m -Xmx144m -XX:MaxMetaspaceSize=120m -XX:ReservedCodeCacheSize=32m -Xss256k -XX:+UseSerialGC"
     ports: ["8761:8761"]
 
   config-server:
     build: { context: ./backend, dockerfile: config-server/Dockerfile }
     container_name: carbonx-config
     depends_on: [discovery-server, kafka]
-    mem_limit: 288m
+    mem_limit: 352m
     environment:
       EUREKA_URI: http://discovery-server:8761/eureka/
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
@@ -78,14 +78,14 @@ services:
     build: { context: ./backend, dockerfile: api-gateway/Dockerfile }
     container_name: carbonx-gateway
     depends_on: [discovery-server, config-server]
-    mem_limit: 320m
+    mem_limit: 384m
     environment:
       EUREKA_URI: http://discovery-server:8761/eureka/
       CONFIG_SERVER_URI: http://config-server:8888
       JWT_SECRET: ${JWT_SECRET}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
       MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
-      JAVA_TOOL_OPTIONS: "-Xms32m -Xmx144m -XX:MaxMetaspaceSize=96m -XX:ReservedCodeCacheSize=32m -Xss256k -XX:+UseSerialGC"
+      JAVA_TOOL_OPTIONS: "-Xms32m -Xmx160m -XX:MaxMetaspaceSize=120m -XX:ReservedCodeCacheSize=32m -Xss256k -XX:+UseSerialGC"
     ports: ["8080:8080"]
 
   web-bff:
@@ -123,7 +123,7 @@ services:
   identity-service:
     build: { context: ./backend, dockerfile: identity-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, discovery-server: { condition: service_started } }
-    mem_limit: 384m
+    mem_limit: 448m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_identity?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -136,13 +136,13 @@ services:
       CONFIG_SERVER_URI: http://config-server:8888
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
-      JAVA_TOOL_OPTIONS: &java_core_opts "-Xms48m -Xmx176m -XX:MaxMetaspaceSize=108m -XX:ReservedCodeCacheSize=32m -Xss256k -XX:+UseSerialGC"
+      JAVA_TOOL_OPTIONS: &java_core_opts "-Xms48m -Xmx192m -XX:MaxMetaspaceSize=144m -XX:ReservedCodeCacheSize=32m -Xss256k -XX:+UseSerialGC"
     ports: ["8081:8081"]
 
   mrv-service:
     build: { context: ./backend, dockerfile: mrv-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, discovery-server: { condition: service_started } }
-    mem_limit: 384m
+    mem_limit: 448m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_mrv?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -161,7 +161,7 @@ services:
   registry-service:
     build: { context: ./backend, dockerfile: registry-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, redis: { condition: service_started } }
-    mem_limit: 384m
+    mem_limit: 448m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_registry?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -178,7 +178,7 @@ services:
   trading-service:
     build: { context: ./backend, dockerfile: trading-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, discovery-server: { condition: service_started } }
-    mem_limit: 384m
+    mem_limit: 448m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_trading?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -194,7 +194,7 @@ services:
   ledger-service:
     build: { context: ./backend, dockerfile: ledger-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, discovery-server: { condition: service_started } }
-    mem_limit: 320m
+    mem_limit: 448m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_ledger?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -204,13 +204,13 @@ services:
       CONFIG_SERVER_URI: http://config-server:8888
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
-      JAVA_TOOL_OPTIONS: "-Xms32m -Xmx144m -XX:MaxMetaspaceSize=96m -XX:ReservedCodeCacheSize=32m -Xss256k -XX:+UseSerialGC"
+      JAVA_TOOL_OPTIONS: *java_core_opts
     ports: ["8085:8085"]
 
   notification-service:
     build: { context: ./backend, dockerfile: notification-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, kafka: { condition: service_started } }
-    mem_limit: 288m
+    mem_limit: 352m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_notification?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
