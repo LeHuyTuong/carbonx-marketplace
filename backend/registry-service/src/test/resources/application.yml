@@ -1,0 +1,48 @@
+# Test-scoped configuration: replaces the service application.yml so unit/slice tests never
+# contact Config Server, Eureka, Kafka, MySQL or Redis. Secrets here are disposable test values.
+spring:
+  application:
+    name: registry-service
+  main:
+    banner-mode: off
+  cloud:
+    config:
+      enabled: false
+    discovery:
+      enabled: false
+    openfeign:
+      circuitbreaker:
+        enabled: true
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: registry-service-test
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+carbonx:
+  security:
+    internal-token: carbonx-internal-test-only-token-32b
+    jwt:
+      secret: carbonx-registry-test-only-signing-secret-32b
+      issuer: carbonx-identity-test
+  kafka:
+    topics:
+      mrv-events: mrv.events
+  outbox:
+    topic: registry.events
+    relay-interval-ms: 600000
+    relay-initial-delay-ms: 600000
+
+logging:
+  level:
+    root: WARN
+    com.carbonx.registry: INFO

@@ -1,5 +1,8 @@
 server:
   port: 8083
+  error:
+    include-message: never
+    include-stacktrace: never
 
 spring:
   application:
@@ -14,11 +17,69 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
   flyway:
     enabled: true
     locations: classpath:db/migration
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      # A slow cache tier must degrade to the database instead of holding the request open.
+      timeout: 2s
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      # Fail fast so a PENDING outbox row reaches DEAD_LETTER instead of blocking a relay tick.
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+        delivery.timeout.ms: 10000
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:registry-service}
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # A consumer group started after the fact must still replay the approved reports it missed.
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    listener:
+      # Offset is committed only when the issuance transaction has committed: no lost batches.
+      ack-mode: record
+  task:
+    scheduling:
+      pool:
+        size: 4
+      thread-name-prefix: carbonx-sched-
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
+      client:
+        config:
+          default:
+            connectTimeout: 2000
+            readTimeout: 5000
+
+carbonx:
+  security:
+    internal-token: ${INTERNAL_SERVICE_TOKEN:}
+    jwt:
+      # Fail-closed: no default secret. The service refuses to start with fewer than 32 bytes.
+      secret: ${JWT_SECRET:}
+      issuer: ${JWT_ISSUER:carbonx-identity}
+  kafka:
+    topics:
+      mrv-events: ${MRV_EVENTS_TOPIC:mrv.events}
+  outbox:
+    topic: ${REGISTRY_EVENTS_TOPIC:registry.events}
+    relay-interval-ms: ${OUTBOX_RELAY_INTERVAL_MS:2000}
+    relay-initial-delay-ms: ${OUTBOX_RELAY_INITIAL_DELAY_MS:5000}
 
 eureka:
   client:
@@ -30,3 +91,7 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus,refresh,busrefresh,circuitbreakers
+  endpoint:
+    health:
+      probes:
+        enabled: true
