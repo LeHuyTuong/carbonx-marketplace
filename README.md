@@ -72,6 +72,7 @@ Spring Boot 3.3 / Java 17 / MySQL 8 · React 19 + Vite 6 + Tailwind 4 + TypeScri
 ```
 backend/                   Maven Multi-Module Reactor (12 modules: Eureka, Config, Gateway, 2 BFFs, 6 Services)
 frontend/                  React 19 SPA (Vite 6, Tailwind v4, React Query, Zustand)
+mobile/                    React Native Expo TypeScript Skeleton (DDD / Logical CQRS khớp 1-1 với mobile-bff)
 config-repo/               Cấu hình tập trung cho Spring Cloud Config Server
 k8s/                       Manifest Kubernetes (ConfigMap, Secret, Deployment, Service) cho GKE / Cloud Run
 monitoring/                Prometheus, Grafana provisioning & MySQL 6-DB init script

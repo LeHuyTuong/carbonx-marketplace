@@ -1,0 +1,31 @@
+{
+  "name": "carbonx-mobile",
+  "version": "1.0.0-alpha",
+  "private": true,
+  "type": "module",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test src/__tests__/mobileBffContract.test.ts"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.83.0",
+    "expo": "~52.0.0",
+    "expo-camera": "~16.0.0",
+    "expo-image-picker": "~16.0.0",
+    "expo-local-authentication": "~15.0.0",
+    "expo-notifications": "~0.29.0",
+    "expo-router": "~4.0.0",
+    "expo-secure-store": "~14.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.5",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/react": "~18.3.12",
+    "typescript": "~5.8.3"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "CarbonX EV",
+    "slug": "carbonx-ev-mobile",
+    "version": "1.0.0",
+    "scheme": "carbonx",
+    "orientation": "portrait",
+    "platforms": ["ios", "android"],
+    "ios": {
+      "bundleIdentifier": "com.carbonx.evmobile",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Capture KYC ID card and EV registration documents for direct encrypted upload to S3.",
+        "NSFaceIDUsageDescription": "Confirm EV Owner identity before approving wallet withdrawals."
+      }
+    },
+    "android": {
+      "package": "com.carbonx.evmobile",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.USE_BIOMETRIC"
+      ]
+    },
+    "extra": {
+      "bffGatewayBaseUrl": "http://localhost:8080/api/mobile"
+    }
+  }
+}

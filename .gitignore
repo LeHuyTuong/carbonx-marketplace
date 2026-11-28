@@ -75,3 +75,8 @@ OPTIMIZATION_LOG.md
 
 ### Reviewer scratch (local MariaDB datadir, logs, vendored sources) ###
 .review-tmp/
+
+# Node / Expo Mobile
+node_modules/
+mobile/.expo/
+mobile/dist/

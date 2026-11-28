@@ -43,13 +43,14 @@ Task nào đi ngược file này thì dừng lại và hỏi.
 
 ## 4. UI
 ### Quyết định
-- Phục vụ 2 kênh giao diện độc lập qua tầng BFF riêng: **Web SPA** (React 19 + Tailwind CSS v4 cho đầy đủ 4 vai trò Admin, CVA, Company, EV Owner — Sidebar phân nhóm, Topbar Breadcrumb, `FileDropzone`, `ConfirmDialog`, KPI kèm đơn vị, biểu đồ Recharts) và **Mobile App** (React Native / Flutter chuyên biệt cho Chủ xe điện — theo dõi số dư ví & nguồn gốc lô tín chỉ chia tiền, chụp ảnh giấy tờ KYC/cà-vẹt xe bằng camera, nhận Push Notification tức thời).
+- Phục vụ 2 kênh giao diện độc lập qua tầng BFF riêng: **Web SPA** (`frontend/`: React 19 + Vite 6 + Tailwind CSS v4 cho đầy đủ 4 vai trò Admin, CVA, Company, EV Owner — Sidebar phân nhóm, Topbar Breadcrumb, `FileDropzone`, `ConfirmDialog`, KPI kèm đơn vị, biểu đồ Recharts) và **Mobile App** (`mobile/`: **React Native + Expo + TypeScript** chuyên biệt cho Chủ xe điện theo cấu trúc Clean Architecture / Logical CQRS khớp 1-1 với `mobile-bff` — theo dõi số dư ví & nguồn gốc lô tín chỉ chia tiền, chụp ảnh giấy tờ KYC/cà-vẹt xe qua S3 Presigned URL, xác thực sinh trắc học khi rút tiền, nhận Push Notification FCM/APNs).
 - Cập nhật màn hình `/marketplace` và `/app/company/orders` khớp luồng mua tức thì 1 bước (bỏ nút `Hoàn tất` / `Huỷ đơn` trên đơn thanh toán ví).
 - Tài liệu và giao diện người dùng giữ nhất quán tiếng Việt.
 ### Lý do
-- Nhu cầu trải nghiệm giữa màn hình quản trị/kiểm toán lớn trên Web (bảng dữ liệu rộng, xuất CSV/PDF) và ứng dụng di động Chủ xe ngoài đường (mạng 4G chập chờn, thao tác 1 chạm, camera, push notification) khác biệt hoàn toàn nên cần cặp UI + BFF chuyên biệt.
+- Nhu cầu trải nghiệm giữa màn hình quản trị/kiểm toán lớn trên Web (bảng dữ liệu rộng, xuất CSV/PDF) và ứng dụng di động Chủ xe ngoài đường (mạng 4G chập chờn, thao tác 1 chạm, camera, push notification) khác biệt hoàn toàn; dùng cùng hệ sinh thái React + TypeScript giữa `frontend/` và `mobile/` giúp đồng nhất hợp đồng kiểu dữ liệu với `web-bff` và `mobile-bff`.
 ### Luật
 - Luôn dùng `ConfirmDialog` và `FileDropzone` dùng chung cho thao tác xác nhận phá huỷ và tải tệp trên Web.
+- Luôn lưu JWT/Refresh Token di động trong Secure Storage (iOS Keychain / Android Keystore qua `SecureTokenVaultPort`), tuyệt đối không lưu plaintext ở AsyncStorage; và giữ ranh giới `domain/` + `application/` của `mobile/` thuần TypeScript, không import ngược `infrastructure/` hay UI framework.
 - Không bao giờ bắt người dùng nhập tay mã ID nội bộ của cơ sở dữ liệu trên giao diện Web hay Mobile.
 
 ## 5. Dữ liệu và quy ước

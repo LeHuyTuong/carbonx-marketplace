@@ -131,3 +131,18 @@ Triển khai 2 module BFF không trạng thái (TUYỆT ĐỐI KHÔNG thêm JPA/
    - Implement `MobileBffCommandUseCase` cấp Presigned S3 PUT URL chụp ảnh CCCD/cà-vẹt xe từ camera, đăng ký FCM/APNs push token sang `notification-service` (`MobilePushNotificationPort`), và gửi yêu cầu rút tiền kèm `Idempotency-Key`.
 3. Chạy `cd backend && mvn test -pl web-bff,mobile-bff -am -B` xanh 100%.
 ```
+
+---
+
+## Prompt 8 — Mobile App `mobile/` (**React Native + Expo + TypeScript** khớp `mobile-bff`)
+
+```text
+Triển khai khung ứng dụng di động `mobile/` cho Chủ xe điện theo cấu trúc Clean Architecture đã định nghĩa (giữ nguyên toàn bộ chữ ký trong `src/domain`, `src/application/port/in` và `src/application/port/out`):
+1. Trong `mobile/src/infrastructure/`:
+   - Implement `MobileBffHttpGatewayPort` bằng Fetch/Axios trỏ về `api-gateway` (`http://<host>:8080/api/mobile`), tự gắn `Authorization: Bearer`, `X-Idempotency-Key` và `X-Request-Trace`, xử lý `degradedMode = true`.
+   - Implement `SecureTokenVaultPort` bằng `expo-secure-store` (CẤM dùng `AsyncStorage` plaintext để lưu JWT).
+   - Implement `CameraMediaPort` dùng `expo-image-picker` + `PUT` thẳng ảnh chụp CCCD/cà-vẹt lên S3 bằng `PresignedCameraUploadGrant`.
+   - Implement `PushNotificationPort` (`expo-notifications`) và `BiometricAuthPort` (`expo-local-authentication`) bắt buộc xác thực FaceID/vân tay trước khi gọi `requestMobileWithdrawal`.
+2. Trong `mobile/src/presentation/` & Expo Router `app/`: dựng 4 tab (`home`, `vehicles`, `payouts`, `wallet`) và 3 màn modal (`kyc-camera`, `payout-provenance/[txId]`, `withdraw-confirm`) đúng hợp đồng `MobileRouteContract.ts`.
+3. Chạy `cd mobile && npm run typecheck && npm test` xanh 100%.
+```
