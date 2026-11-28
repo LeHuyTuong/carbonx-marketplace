@@ -1,5 +1,8 @@
 server:
   port: 8081
+  error:
+    include-message: never
+    include-stacktrace: never
 
 spring:
   application:
@@ -14,11 +17,61 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
   flyway:
     enabled: true
     locations: classpath:db/migration
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      # Fail fast so a PENDING outbox row reaches DEAD_LETTER instead of blocking a relay tick.
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+        delivery.timeout.ms: 10000
+  task:
+    scheduling:
+      # Spring Cloud Bus (Kafka binder) retries on the scheduled pool; a single thread would
+      # starve the outbox relay whenever the broker is unreachable.
+      pool:
+        size: 4
+      thread-name-prefix: carbonx-sched-
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
+
+carbonx:
+  security:
+    internal-token: ${INTERNAL_SERVICE_TOKEN:}
+    jwt:
+      # Fail-closed: no default secret. The service refuses to start with fewer than 32 bytes.
+      secret: ${JWT_SECRET:}
+      issuer: ${JWT_ISSUER:carbonx-identity}
+      access-token-ttl: ${JWT_ACCESS_TTL:PT1H}
+      refresh-token-ttl: ${JWT_REFRESH_TTL:P7D}
+    oauth2:
+      # SPA landing page that receives the JWT in the URL fragment (#token=...).
+      success-redirect-uri: ${OAUTH2_SUCCESS_REDIRECT_URI:http://localhost:5173/oauth-success}
+      google:
+        client-id: ${GOOGLE_CLIENT_ID:}
+        client-secret: ${GOOGLE_CLIENT_SECRET:}
+        redirect-uri: ${GOOGLE_REDIRECT_URI:}
+  outbox:
+    relay-interval-ms: ${OUTBOX_RELAY_INTERVAL_MS:2000}
+    relay-initial-delay-ms: ${OUTBOX_RELAY_INITIAL_DELAY_MS:5000}
+  bootstrap:
+    admin:
+      enabled: ${ADMIN_BOOTSTRAP_ENABLED:true}
+      email: ${ADMIN_BOOTSTRAP_EMAIL:admin@carbonx.vn}
+      password: ${ADMIN_BOOTSTRAP_PASSWORD:Admin@123456}
+      full-name: ${ADMIN_BOOTSTRAP_NAME:CarbonX Administrator}
 
 eureka:
   client:
@@ -30,3 +83,7 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus,refresh,busrefresh,circuitbreakers
+  endpoint:
+    health:
+      probes:
+        enabled: true

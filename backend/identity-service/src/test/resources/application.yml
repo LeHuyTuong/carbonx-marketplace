@@ -1,0 +1,45 @@
+# Test-scoped configuration: replaces the service application.yml so unit/slice tests never
+# contact Config Server, Eureka or Kafka. Secrets here are disposable test values.
+spring:
+  application:
+    name: identity-service
+  main:
+    banner-mode: off
+  cloud:
+    config:
+      enabled: false
+    discovery:
+      enabled: false
+    openfeign:
+      circuitbreaker:
+        enabled: true
+  kafka:
+    bootstrap-servers: localhost:9092
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+carbonx:
+  security:
+    internal-token: carbonx-internal-test-only-token-32b
+    jwt:
+      secret: carbonx-identity-test-only-signing-secret-32b
+      issuer: carbonx-identity-test
+      access-token-ttl: PT10M
+      refresh-token-ttl: P1D
+    oauth2:
+      success-redirect-uri: http://localhost:5173/oauth-success
+  outbox:
+    relay-interval-ms: 600000
+    relay-initial-delay-ms: 600000
+  bootstrap:
+    admin:
+      enabled: false
+
+logging:
+  level:
+    root: WARN
+    com.carbonx.identity: INFO
