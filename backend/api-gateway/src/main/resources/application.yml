@@ -9,6 +9,13 @@ spring:
   cloud:
     gateway:
       routes:
+        - id: internal-deny
+          uri: no://op
+          order: -100
+          predicates:
+            - Path=/api/v1/internal/**
+          filters:
+            - SetStatus=403
         - id: web-bff
           uri: lb://web-bff
           predicates:
@@ -20,23 +27,23 @@ spring:
         - id: identity-service
           uri: lb://identity-service
           predicates:
-            - Path=/api/v1/auth/**,/api/v1/kyc/**,/api/v1/vehicles/**,/api/v1/users/**
+            - Path=/api/v1/auth/**,/api/v1/kyc/**,/api/v1/vehicles/**,/api/v1/users/**,/api/v1/change-password
         - id: mrv-service
           uri: lb://mrv-service
           predicates:
-            - Path=/api/v1/projects/**,/api/v1/project-applications/**,/api/v1/reports/**,/api/v1/ai/**
+            - Path=/api/v1/projects/**,/api/v1/project-applications/**,/api/v1/applications/**,/api/v1/reports/**,/api/v1/ai/**
         - id: registry-service
           uri: lb://registry-service
           predicates:
-            - Path=/api/v1/credits/**
+            - Path=/api/v1/credits/**,/api/v1/my/credits/**,/api/v1/holdings/**,/api/v1/batches/**
         - id: trading-service
           uri: lb://trading-service
           predicates:
-            - Path=/api/v1/marketplace/**,/api/v1/orders/**
+            - Path=/api/v1/marketplace/**,/api/v1/orders/**,/api/v1/trading/**
         - id: ledger-service
           uri: lb://ledger-service
           predicates:
-            - Path=/api/v1/wallet/**,/api/v1/payment/**,/api/v1/withdrawal/**,/api/v1/profit-sharing/**,/api/v1/companies/payout-formula
+            - Path=/api/v1/wallet/**,/api/v1/payment/**,/api/v1/paymentDetails,/api/v1/withdrawal/**,/api/v1/profit-sharing/**,/api/v1/companies/**
         - id: notification-service
           uri: lb://notification-service
           predicates:
@@ -72,3 +79,9 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus,gateway
+
+carbonx:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:}
+      issuer: ${JWT_ISSUER:carbonx-identity}

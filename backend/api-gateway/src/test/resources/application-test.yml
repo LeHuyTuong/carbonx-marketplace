@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: api-gateway
+  main:
+    banner-mode: off
+  cloud:
+    config:
+      enabled: false
+    discovery:
+      enabled: false
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+carbonx:
+  security:
+    jwt:
+      secret: carbonx-gateway-test-only-signing-secret-32b
+      issuer: carbonx-identity
