@@ -3,6 +3,12 @@ services:
     image: mysql:8.0
     container_name: carbonx-mysql
     restart: unless-stopped
+    mem_limit: 448m
+    command:
+      - "--innodb-buffer-pool-size=96M"
+      - "--innodb-log-buffer-size=8M"
+      - "--performance-schema=OFF"
+      - "--max-connections=100"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
     volumes:
@@ -20,6 +26,8 @@ services:
     image: redis:7.4-alpine
     container_name: carbonx-redis
     restart: unless-stopped
+    mem_limit: 48m
+    command: ["redis-server", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
     ports:
       - "6379:6379"
 
@@ -27,6 +35,7 @@ services:
     image: apache/kafka:3.8.0
     container_name: carbonx-kafka
     restart: unless-stopped
+    mem_limit: 384m
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -36,22 +45,31 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_BYTES: 104857600
+      KAFKA_HEAP_OPTS: "-Xms96m -Xmx160m"
     ports:
       - "9092:9092"
 
   discovery-server:
     build: { context: ./backend, dockerfile: discovery-server/Dockerfile }
     container_name: carbonx-eureka
+    mem_limit: 288m
+    environment:
+      MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
+      JAVA_TOOL_OPTIONS: &java_light_opts "-Xms24m -Xmx128m -XX:MaxMetaspaceSize=88m -XX:ReservedCodeCacheSize=32m -Xss256k -XX:+UseSerialGC"
     ports: ["8761:8761"]
 
   config-server:
     build: { context: ./backend, dockerfile: config-server/Dockerfile }
     container_name: carbonx-config
     depends_on: [discovery-server, kafka]
+    mem_limit: 288m
     environment:
       EUREKA_URI: http://discovery-server:8761/eureka/
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       CONFIG_REPO_PATH: file:/config-repo
+      MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
+      JAVA_TOOL_OPTIONS: *java_light_opts
     volumes:
       - ./config-repo:/config-repo:ro
     ports: ["8888:8888"]
@@ -60,63 +78,90 @@ services:
     build: { context: ./backend, dockerfile: api-gateway/Dockerfile }
     container_name: carbonx-gateway
     depends_on: [discovery-server, config-server]
+    mem_limit: 320m
     environment:
       EUREKA_URI: http://discovery-server:8761/eureka/
       CONFIG_SERVER_URI: http://config-server:8888
+      JWT_SECRET: ${JWT_SECRET}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
+      JAVA_TOOL_OPTIONS: "-Xms32m -Xmx144m -XX:MaxMetaspaceSize=96m -XX:ReservedCodeCacheSize=32m -Xss256k -XX:+UseSerialGC"
     ports: ["8080:8080"]
 
   web-bff:
+    profiles: ["bff"]
     build: { context: ./backend, dockerfile: web-bff/Dockerfile }
     container_name: carbonx-web-bff
     depends_on: [discovery-server, config-server]
+    mem_limit: 288m
     environment:
       EUREKA_URI: http://discovery-server:8761/eureka/
       CONFIG_SERVER_URI: http://config-server:8888
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
+      JAVA_TOOL_OPTIONS: *java_light_opts
     ports: ["8091:8091"]
 
   mobile-bff:
+    profiles: ["bff"]
     build: { context: ./backend, dockerfile: mobile-bff/Dockerfile }
     container_name: carbonx-mobile-bff
     depends_on: [discovery-server, config-server]
+    mem_limit: 288m
     environment:
       EUREKA_URI: http://discovery-server:8761/eureka/
       CONFIG_SERVER_URI: http://config-server:8888
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
+      JAVA_TOOL_OPTIONS: *java_light_opts
     ports: ["8092:8092"]
 
   identity-service:
     build: { context: ./backend, dockerfile: identity-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, discovery-server: { condition: service_started } }
+    mem_limit: 384m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_identity?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      OAUTH2_SUCCESS_REDIRECT_URI: ${OAUTH2_SUCCESS_REDIRECT_URI:-http://localhost:5173/oauth-success}
       EUREKA_URI: http://discovery-server:8761/eureka/
       CONFIG_SERVER_URI: http://config-server:8888
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
+      JAVA_TOOL_OPTIONS: &java_core_opts "-Xms48m -Xmx176m -XX:MaxMetaspaceSize=108m -XX:ReservedCodeCacheSize=32m -Xss256k -XX:+UseSerialGC"
     ports: ["8081:8081"]
 
   mrv-service:
     build: { context: ./backend, dockerfile: mrv-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, discovery-server: { condition: service_started } }
+    mem_limit: 384m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_mrv?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       AI_BASE_URL: ${AI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}
       AI_API_KEY: ${AI_API_KEY}
       AI_MODEL: ${AI_MODEL:-gemini-2.5-flash}
       EUREKA_URI: http://discovery-server:8761/eureka/
       CONFIG_SERVER_URI: http://config-server:8888
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
+      JAVA_TOOL_OPTIONS: *java_core_opts
     ports: ["8082:8082"]
 
   registry-service:
     build: { context: ./backend, dockerfile: registry-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, redis: { condition: service_started } }
+    mem_limit: 384m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_registry?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -124,63 +169,88 @@ services:
       EUREKA_URI: http://discovery-server:8761/eureka/
       CONFIG_SERVER_URI: http://config-server:8888
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
+      JAVA_TOOL_OPTIONS: *java_core_opts
     ports: ["8083:8083"]
 
   trading-service:
     build: { context: ./backend, dockerfile: trading-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, discovery-server: { condition: service_started } }
+    mem_limit: 384m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_trading?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       EUREKA_URI: http://discovery-server:8761/eureka/
       CONFIG_SERVER_URI: http://config-server:8888
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
+      JAVA_TOOL_OPTIONS: *java_core_opts
     ports: ["8084:8084"]
 
   ledger-service:
     build: { context: ./backend, dockerfile: ledger-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, discovery-server: { condition: service_started } }
+    mem_limit: 320m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_ledger?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       EUREKA_URI: http://discovery-server:8761/eureka/
       CONFIG_SERVER_URI: http://config-server:8888
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
+      JAVA_TOOL_OPTIONS: "-Xms32m -Xmx144m -XX:MaxMetaspaceSize=96m -XX:ReservedCodeCacheSize=32m -Xss256k -XX:+UseSerialGC"
     ports: ["8085:8085"]
 
   notification-service:
     build: { context: ./backend, dockerfile: notification-service/Dockerfile }
     depends_on: { mysql: { condition: service_healthy }, kafka: { condition: service_started } }
+    mem_limit: 288m
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/carbonx_notification?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
       EUREKA_URI: http://discovery-server:8761/eureka/
       CONFIG_SERVER_URI: http://config-server:8888
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MANAGEMENT_TRACING_ENABLED: ${MANAGEMENT_TRACING_ENABLED:-false}
+      JAVA_TOOL_OPTIONS: *java_light_opts
     ports: ["8086:8086"]
 
   frontend:
     build: { context: ./frontend, dockerfile: Dockerfile }
     container_name: carbonx-frontend
     depends_on: [api-gateway]
+    mem_limit: 48m
     ports: ["3000:80"]
 
   jaeger:
+    profiles: ["observability"]
     image: jaegertracing/all-in-one:1.60
     container_name: carbonx-jaeger
+    mem_limit: 256m
     environment: { COLLECTOR_OTLP_ENABLED: "true" }
     ports: ["16686:16686", "4317:4317", "4318:4318"]
 
   prometheus:
+    profiles: ["observability"]
     image: prom/prometheus:v2.54.1
     container_name: carbonx-prometheus
+    mem_limit: 256m
     volumes: ["./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
     ports: ["9090:9090"]
 
   grafana:
+    profiles: ["observability"]
     image: grafana/grafana:11.2.0
     container_name: carbonx-grafana
     depends_on: [prometheus]
+    mem_limit: 192m
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}

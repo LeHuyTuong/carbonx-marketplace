@@ -1,5 +1,7 @@
 # 08 — Target Architecture
 
+> **Đã bị thay (28/11/2026):** CarbonX đi microservices theo [MASTER-PLAN.md](../../MASTER-PLAN.md). Mọi lựa chọn modular monolith / package-by-feature trong file này chỉ còn giá trị lịch sử; mâu thuẫn thì theo MASTER-PLAN.
+
 ## Alternatives Considered
 
 | Criterion | (a) Keep package-by-layer | (b) Multi-module Maven | (c) Microservices | (d) Clean/Hexagonal everywhere | (e) **Modular monolith, package-by-feature (chosen)** |

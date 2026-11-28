@@ -1,5 +1,7 @@
 # 28 — Architecture Reassessment (challenging package-by-feature)
 
+> **Đã bị thay (28/11/2026):** CarbonX đi microservices theo [MASTER-PLAN.md](../../MASTER-PLAN.md). Mọi lựa chọn modular monolith / package-by-feature trong file này chỉ còn giá trị lịch sử; mâu thuẫn thì theo MASTER-PLAN.
+
 ## The Mandated Hypothesis Test
 
 > *Can all meaningful problems identified in the audits be solved while keeping package-by-layer?*

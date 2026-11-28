@@ -1,5 +1,7 @@
 # 30 — Open Questions (UNKNOWNs requiring evidence or business decisions)
 
+> **Đã bị thay (28/11/2026):** CarbonX đi microservices theo [MASTER-PLAN.md](../../MASTER-PLAN.md). Mọi lựa chọn modular monolith / package-by-feature trong file này chỉ còn giá trị lịch sử; mâu thuẫn thì theo MASTER-PLAN.
+
 ## Business-Intent Questions (owner: product/team)
 
 | # | Question | Why it matters | Default assumption if unanswered |

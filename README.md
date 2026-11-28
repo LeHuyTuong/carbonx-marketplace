@@ -180,66 +180,48 @@ Integration test đa luồng trên MySQL 8 thật (Testcontainers):
 cd backend/Market_carbon && ./mvnw verify -Dit.test=OrderSettlementConcurrencyIT
 ```
 
-## Chạy local
+## Chạy local & Triển khai từng bước
 
-**Cách nhanh — Docker Compose**
-
-```bash
-cp .env.example .env     # điền MYSQL_ROOT_PASSWORD, SPRING_MAIL_*, JWT_SECRET, STRIPE/PAYPAL
-docker compose up --build -d
-# MySQL :3307 · Backend :8082 · Frontend :3000
-```
-
-**Chạy riêng từng phần**
+**Bước 1 — Khởi động hạ tầng nền (MySQL 6 DB + Redis + Kafka + Eureka + Config Server + Observability)**
 
 ```bash
-# Backend (cần MySQL, ví dụ: docker compose up -d db)
-cd backend/Market_carbon
-SPRING_PROFILES_ACTIVE=local ./mvnw spring-boot:run     # http://localhost:8082
-
-# Frontend (proxy /api sang :8082)
-cd frontend
-npm install
-npm run dev                                              # http://localhost:5173
-# Nạp thêm dữ liệu mẫu phong phú (24 tài khoản, 24 xe điện, 11 tin đăng, 10 báo cáo)
-python3 scripts/seed_demo_rich.py
+cp .env.example .env     # điền MYSQL_ROOT_PASSWORD, JWT_SECRET, AI_API_KEY
+docker compose up -d mysql redis kafka discovery-server config-server jaeger prometheus grafana
+# Eureka :8761 · Config Server :8888 · Jaeger :16686 · Prometheus :9090 · Grafana :3001
 ```
 
-Biến môi trường backend tối thiểu: `SPRING_DATASOURCE_URL/USERNAME/PASSWORD`, `JWT_SECRET`, `SPRING_MAIL_*`. Danh sách đầy đủ xem `.env.example` và `application.properties`. Không commit giá trị thật.
+**Bước 2 — Implement & chạy từng phần**
 
-## Tài khoản demo (chỉ dữ liệu seed local)
+```bash
+# Backend Microservices + BFF (khung DDD/CQRS chuẩn ArchUnit)
+cd backend && mvn test -T 1C -B
 
-Mật khẩu mặc định của seed: `Password@1` (cấu hình đổi qua `carbonx.seed.*-password`).
+# Web Frontend (React 19 SPA)
+cd frontend && npm install && npm run dev     # http://localhost:5173
 
-| Vai trò | Email |
-|---|---|
-| Admin | `admin@gmail.com` |
-| Doanh nghiệp | `company@example.com` |
-| CVA | `cva@example.com` |
-| Chủ xe điện | `evowner@example.com` |
+# Mobile App (React Native + Expo + TypeScript khớp mobile-bff)
+cd mobile && npm install && npm run typecheck && npm test
+```
 
-Trang đăng nhập có 4 nút **Đăng nhập nhanh** cho các tài khoản này.
+> Lưu ý: Phần lõi 6 microservices nghiệp vụ và 2 BFF hiện đang ở dạng **khung interface DDD/CQRS + Flyway migration** sẵn sàng để triển khai dần theo thứ tự trong [`docs/prompts/DEEPSEEK_PROMPTS.md`](docs/prompts/DEEPSEEK_PROMPTS.md); backend monolith tham chiếu cũ nằm tại [`backend/Market_carbon/`](backend/Market_carbon/).
+
+Biến môi trường tối thiểu xem [`.env.example`](.env.example). Không commit giá trị thật.
 
 ## Kiểm thử
 
 ```bash
-cd frontend && npm test && npm run build          # Vitest + typecheck + build
-cd backend/Market_carbon && ./mvnw test           # unit test
-cd backend/Market_carbon && ./mvnw verify         # thêm integration test (cần Docker)
+cd backend && mvn test -T 1C -B                  # ArchUnit + 6-State Saga + compile 13 reactor items
+cd mobile && npm run typecheck && npm test       # Strict TS + Clean boundary + BFF parity test
+cd frontend && npm test && npm run build         # Vitest + typecheck + Vite build
 ```
 
 ## Tài liệu
 
-- Kiến trúc, nợ kỹ thuật, phát hiện bảo mật: [`docs/architecture/`](docs/architecture/)
-- Tài liệu chức năng: [Google Drive](https://drive.google.com/drive/u/1/folders/1V0FyoZw_b9KMyj4aiCg9Z2sy7t4khyE-)
+- Quy chuẩn 10 tầng: [`MASTER-PLAN.md`](MASTER-PLAN.md)
+- Sơ đồ kiến trúc & ERD từng service: [`docs/diagrams/microservices-architecture.png`](docs/diagrams/microservices-architecture.png), [`docs/diagrams/conceptual-erd.png`](docs/diagrams/conceptual-erd.png), [`docs/diagrams/services/`](docs/diagrams/services/)
+- Bộ prompt triển khai từng service & Mobile: [`docs/prompts/DEEPSEEK_PROMPTS.md`](docs/prompts/DEEPSEEK_PROMPTS.md)
+- Tài liệu kiểm toán & bảo mật: [`docs/architecture/`](docs/architecture/), [`docs/security/SECURITY_AUDIT.md`](docs/security/SECURITY_AUDIT.md)
 
-## Nhóm — AQHighTeam
+## Tác giả
 
-| MSSV | Họ tên | GitHub |
-|---|---|---|
-| SE196732 | Nguyễn Gia Khiêm | https://github.com/giakhiem20051710 |
-| SE196853 | Lê Huy Tường | https://github.com/LeHuyTuong |
-| SE196587 | Phan Bảo Tín | https://github.com/linh20051708 |
-| SE193952 | Phạm Thị Diệu Linh | https://github.com/PhanBaoTin |
-
-Bài nộp học thuật; không nhận đóng góp bên ngoài.
+- **Lê Huy Tường** — Solo Author & Solution Architect ([GitHub @LeHuyTuong](https://github.com/LeHuyTuong))
