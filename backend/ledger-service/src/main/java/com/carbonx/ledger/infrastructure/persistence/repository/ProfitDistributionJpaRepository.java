@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ProfitDistributionJpaRepository extends JpaRepository<ProfitDistributionJpaEntity, Long> {
-    Optional<ProfitDistributionJpaEntity> findByIdempotencyKey(String idempotencyKey);
+    Optional<ProfitDistributionJpaEntity> findBySourceReportId(Long sourceReportId);
     List<ProfitDistributionJpaEntity> findByCompanyIdOrderByIdDesc(Long companyId);
     List<ProfitDistributionJpaEntity> findAllByOrderByIdDesc();
 }

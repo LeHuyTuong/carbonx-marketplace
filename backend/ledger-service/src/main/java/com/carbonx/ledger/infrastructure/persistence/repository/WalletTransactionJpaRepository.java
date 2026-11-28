@@ -10,9 +10,10 @@ public interface WalletTransactionJpaRepository extends JpaRepository<WalletTran
 
     Optional<WalletTransactionJpaEntity> findByIdempotencyKey(String idempotencyKey);
 
-    List<WalletTransactionJpaEntity> findByOrderRefOrderByIdAsc(Long orderRef);
+    List<WalletTransactionJpaEntity> findByReferenceTypeAndReferenceIdOrderByIdAsc(
+            String referenceType, String referenceId);
 
-    List<WalletTransactionJpaEntity> findByUserIdOrderByIdDesc(Long userId);
+    List<WalletTransactionJpaEntity> findByWalletIdOrderByIdDesc(Long walletId);
 
     List<WalletTransactionJpaEntity> findAllByOrderByIdDesc();
 }

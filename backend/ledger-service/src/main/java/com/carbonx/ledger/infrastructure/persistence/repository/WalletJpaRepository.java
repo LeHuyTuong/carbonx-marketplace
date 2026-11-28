@@ -11,9 +11,9 @@ import java.util.Optional;
 
 public interface WalletJpaRepository extends JpaRepository<WalletJpaEntity, Long> {
 
-    Optional<WalletJpaEntity> findByUserId(Long userId);
+    Optional<WalletJpaEntity> findByOwnerUserId(Long ownerUserId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT w FROM WalletJpaEntity w WHERE w.userId = :userId")
-    Optional<WalletJpaEntity> findByUserIdForUpdate(@Param("userId") Long userId);
+    @Query("SELECT w FROM WalletJpaEntity w WHERE w.ownerUserId = :ownerUserId")
+    Optional<WalletJpaEntity> findByOwnerUserIdForUpdate(@Param("ownerUserId") Long ownerUserId);
 }

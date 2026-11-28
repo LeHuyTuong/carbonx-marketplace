@@ -27,30 +27,24 @@ public class WithdrawalJpaEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "user_id", nullable = false)
-    private Long userId;
+    @Column(name = "wallet_id", nullable = false)
+    private Long walletId;
 
-    @Column(name = "amount", nullable = false, precision = 18, scale = 4)
-    private BigDecimal amount;
+    @Column(name = "bank_account_id", nullable = false)
+    private Long bankAccountId;
+
+    @Column(name = "amount_usd", nullable = false, precision = 18, scale = 4)
+    private BigDecimal amountUsd;
 
     @Column(name = "status", nullable = false, length = 32)
     private String status;
 
-    @Column(name = "bank_name", length = 128)
-    private String bankName;
+    @Column(name = "processed_by_admin")
+    private Long processedByAdmin;
 
-    @Column(name = "account_number", length = 64)
-    private String accountNumber;
-
-    @Column(name = "account_holder", length = 128)
-    private String accountHolder;
-
-    @Column(name = "processed_by")
-    private Long processedBy;
+    @Column(name = "requested_at", nullable = false)
+    private Instant requestedAt;
 
     @Column(name = "processed_at")
     private Instant processedAt;
-
-    @Column(name = "created_at", nullable = false)
-    private Instant createdAt;
 }

@@ -28,14 +28,11 @@ public class WalletJpaEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "user_id", nullable = false, unique = true)
-    private Long userId;
+    @Column(name = "owner_user_id", nullable = false, unique = true)
+    private Long ownerUserId;
 
-    @Column(name = "balance", nullable = false, precision = 18, scale = 4)
-    private BigDecimal balance;
-
-    @Column(name = "currency", nullable = false, length = 10)
-    private String currency;
+    @Column(name = "balance_usd", nullable = false, precision = 18, scale = 4)
+    private BigDecimal balanceUsd;
 
     @Version
     @Column(name = "version", nullable = false)

@@ -30,3 +30,10 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus,refresh,busrefresh,circuitbreakers
+
+carbonx:
+  security:
+    internal-token: ${INTERNAL_SERVICE_TOKEN:}
+    jwt:
+      secret: ${JWT_SECRET:}
+      issuer: ${JWT_ISSUER:carbonx-identity}

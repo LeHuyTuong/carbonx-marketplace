@@ -17,21 +17,20 @@ public class WalletPersistenceAdapter implements WalletRepositoryPort {
 
     @Override
     public Optional<Wallet> findByUserId(Long userId) {
-        return repository.findByUserId(userId).map(WalletPersistenceAdapter::toDomain);
+        return repository.findByOwnerUserId(userId).map(WalletPersistenceAdapter::toDomain);
     }
 
     @Override
     public Optional<Wallet> findByUserIdForUpdate(Long userId) {
-        return repository.findByUserIdForUpdate(userId).map(WalletPersistenceAdapter::toDomain);
+        return repository.findByOwnerUserIdForUpdate(userId).map(WalletPersistenceAdapter::toDomain);
     }
 
     @Override
     public Wallet save(Wallet wallet) {
         WalletJpaEntity saved = repository.save(WalletJpaEntity.builder()
                 .id(wallet.id())
-                .userId(wallet.userId())
-                .balance(wallet.balance())
-                .currency(wallet.currency())
+                .ownerUserId(wallet.userId())
+                .balanceUsd(wallet.balance())
                 .version(wallet.version())
                 .createdAt(wallet.createdAt())
                 .updatedAt(wallet.updatedAt())
@@ -40,7 +39,7 @@ public class WalletPersistenceAdapter implements WalletRepositoryPort {
     }
 
     private static Wallet toDomain(WalletJpaEntity entity) {
-        return new Wallet(entity.getId(), entity.getUserId(), entity.getBalance(),
-                entity.getCurrency(), entity.getVersion(), entity.getCreatedAt(), entity.getUpdatedAt());
+        return new Wallet(entity.getId(), entity.getOwnerUserId(), entity.getBalanceUsd(),
+                Wallet.DEFAULT_CURRENCY, entity.getVersion(), entity.getCreatedAt(), entity.getUpdatedAt());
     }
 }

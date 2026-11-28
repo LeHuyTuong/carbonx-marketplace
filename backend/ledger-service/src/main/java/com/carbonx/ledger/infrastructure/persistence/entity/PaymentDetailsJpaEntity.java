@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 import java.time.Instant;
 
 @Entity
-@Table(name = "payment_details")
+@Table(name = "bank_accounts")
 @Getter
 @Builder
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
@@ -26,20 +26,23 @@ public class PaymentDetailsJpaEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "user_id", nullable = false, unique = true)
-    private Long userId;
+    @Column(name = "wallet_id", nullable = false)
+    private Long walletId;
 
     @Column(name = "bank_name", nullable = false, length = 128)
     private String bankName;
 
+    @Column(name = "branch", length = 128)
+    private String branch;
+
     @Column(name = "account_number", nullable = false, length = 64)
     private String accountNumber;
 
-    @Column(name = "account_holder", nullable = false, length = 128)
+    @Column(name = "account_holder", nullable = false, length = 191)
     private String accountHolder;
 
-    @Column(name = "branch", length = 128)
-    private String branch;
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;

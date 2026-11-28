@@ -30,17 +30,23 @@ public class ProfitDistributionJpaEntity {
     @Column(name = "company_id", nullable = false)
     private Long companyId;
 
-    @Column(name = "source_report_id", nullable = false)
+    @Column(name = "source_report_id", nullable = false, unique = true)
     private Long sourceReportId;
 
-    @Column(name = "idempotency_key", nullable = false, unique = true, length = 128)
-    private String idempotencyKey;
+    @Column(name = "credit_batch_id", nullable = false)
+    private Long creditBatchId;
 
-    @Column(name = "total_amount", nullable = false, precision = 18, scale = 4)
-    private BigDecimal totalAmount;
+    @Column(name = "batch_code_snap", nullable = false, length = 128)
+    private String batchCodeSnap;
 
-    @Column(name = "recipient_count", nullable = false)
-    private int recipientCount;
+    @Column(name = "period", nullable = false, length = 32)
+    private String period;
+
+    @Column(name = "unit_price_per_credit", nullable = false, precision = 18, scale = 4)
+    private BigDecimal unitPricePerCredit;
+
+    @Column(name = "total_payout_usd", nullable = false, precision = 18, scale = 4)
+    private BigDecimal totalPayoutUsd;
 
     @Column(name = "status", nullable = false, length = 32)
     private String status;

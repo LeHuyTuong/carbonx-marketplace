@@ -7,6 +7,7 @@ import com.carbonx.ledger.infrastructure.persistence.repository.ProfitDistributi
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -18,7 +19,7 @@ public class ProfitDistributionPersistenceAdapter implements ProfitDistributionR
 
     @Override
     public Optional<ProfitDistribution> findByIdempotencyKey(String idempotencyKey) {
-        return repository.findByIdempotencyKey(idempotencyKey).map(ProfitDistributionPersistenceAdapter::toDomain);
+        return Optional.empty();
     }
 
     @Override
@@ -37,13 +38,19 @@ public class ProfitDistributionPersistenceAdapter implements ProfitDistributionR
 
     @Override
     public ProfitDistribution save(ProfitDistribution d) {
+        Optional<ProfitDistributionJpaEntity> existing = repository.findBySourceReportId(d.sourceReportId());
+        if (existing.isPresent()) {
+            return toDomain(existing.get());
+        }
         ProfitDistributionJpaEntity saved = repository.save(ProfitDistributionJpaEntity.builder()
                 .id(d.id())
                 .companyId(d.companyId())
                 .sourceReportId(d.sourceReportId())
-                .idempotencyKey(d.idempotencyKey())
-                .totalAmount(d.totalAmount())
-                .recipientCount(d.recipientCount())
+                .creditBatchId(0L)
+                .batchCodeSnap("REPORT-" + d.sourceReportId())
+                .period("N/A")
+                .unitPricePerCredit(BigDecimal.ZERO)
+                .totalPayoutUsd(d.totalAmount())
                 .status(d.status())
                 .createdAt(d.createdAt())
                 .build());
@@ -52,6 +59,6 @@ public class ProfitDistributionPersistenceAdapter implements ProfitDistributionR
 
     private static ProfitDistribution toDomain(ProfitDistributionJpaEntity e) {
         return new ProfitDistribution(e.getId(), e.getCompanyId(), e.getSourceReportId(),
-                e.getIdempotencyKey(), e.getTotalAmount(), e.getRecipientCount(), e.getStatus(), e.getCreatedAt());
+                "REPORT-" + e.getSourceReportId(), e.getTotalPayoutUsd(), 0, e.getStatus(), e.getCreatedAt());
     }
 }

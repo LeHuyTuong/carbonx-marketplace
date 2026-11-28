@@ -30,25 +30,28 @@ public class WalletTransactionJpaEntity {
     @Column(name = "wallet_id", nullable = false)
     private Long walletId;
 
-    @Column(name = "user_id", nullable = false)
-    private Long userId;
+    @Column(name = "idempotency_key", nullable = false, unique = true, length = 128)
+    private String idempotencyKey;
 
     @Column(name = "tx_type", nullable = false, length = 32)
     private String txType;
 
-    @Column(name = "amount", nullable = false, precision = 18, scale = 4)
-    private BigDecimal amount;
+    @Column(name = "amount_usd", nullable = false, precision = 18, scale = 4)
+    private BigDecimal amountUsd;
+
+    @Column(name = "balance_before", nullable = false, precision = 18, scale = 4)
+    private BigDecimal balanceBefore;
 
     @Column(name = "balance_after", nullable = false, precision = 18, scale = 4)
     private BigDecimal balanceAfter;
 
-    @Column(name = "order_ref")
-    private Long orderRef;
+    @Column(name = "reference_type", length = 64)
+    private String referenceType;
 
-    @Column(name = "idempotency_key", unique = true, length = 128)
-    private String idempotencyKey;
+    @Column(name = "reference_id", length = 128)
+    private String referenceId;
 
-    @Column(name = "description", length = 255)
+    @Column(name = "description", length = 500)
     private String description;
 
     @Column(name = "created_at", nullable = false)
