@@ -15,7 +15,7 @@ export function normalizeRole(value: unknown): Role | null {
 }
 
 export function toBackendRole(role: Role): string {
-  return role === 'COMPANY' ? 'CC_BUYER' : role
+  return `ROLE_${role}`
 }
 
 export function roleHome(role: Role | null): string {

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Eye, RefreshCw, Search, ShieldCheck, UserCheck, Users } from 'lucide-react'
+import { Eye, Plus, RefreshCw, Search, ShieldCheck, UserCheck, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/shared/api/client'
 import { errorMessage, mapAdminUser, mapList, type AdminUser } from '@/shared/api/phase3b'
@@ -14,17 +14,49 @@ import { QueryError, QueryLoading, SectionCard } from '@/pages/components/QueryS
 
 const USER_STATUSES = ['ACTIVE', 'INACTIVE', 'PENDING', 'BANNED'] as const
 type UserStatus = (typeof USER_STATUSES)[number]
+type StaffRole = 'ROLE_CVA' | 'ROLE_ADMIN' | 'ROLE_COMPANY' | 'ROLE_EV_OWNER'
 
 export function AdminUsersPage() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [role, setRole] = useState<StaffRole>('ROLE_CVA')
 
   const usersQuery = useQuery({
     queryKey: queryKeys.phase3b.users,
     queryFn: async () => mapList(await api.get<unknown>('/users'), mapAdminUser),
   })
+
+  const createMutation = useMutation({
+    mutationFn: (payload: { fullName: string; email: string; password: string; role: StaffRole }) =>
+      api.post<unknown>('/users', payload),
+    onSuccess: async () => {
+      toast.success('Đã tạo tài khoản mới')
+      setCreateOpen(false)
+      setFullName('')
+      setEmail('')
+      setPassword('')
+      setRole('ROLE_CVA')
+      await queryClient.invalidateQueries({ queryKey: queryKeys.phase3b.users })
+    },
+    onError: (error) => toast.error('Không tạo được tài khoản', { description: errorMessage(error) }),
+  })
+
+  const handleCreateSubmit = (event: FormEvent) => {
+    event.preventDefault()
+    if (!fullName.trim() || !email.trim() || password.length < 8) {
+      toast.error('Thông tin chưa hợp lệ', {
+        description: 'Vui lòng nhập họ tên, email và mật khẩu tối thiểu 8 ký tự.',
+      })
+      return
+    }
+    createMutation.mutate({ fullName: fullName.trim(), email: email.trim(), password, role })
+  }
 
   const statusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: number; status: UserStatus }) =>
@@ -55,15 +87,23 @@ export function AdminUsersPage() {
       <PageIntro
         eyebrow="Admin"
         title="Quản lý người dùng"
-        description="Tra cứu tài khoản theo email, tên hoặc vai trò và thay đổi trạng thái hoạt động của người dùng."
+        description="Tra cứu tài khoản, cấp mới tài khoản CVA/Admin nội bộ (BR-08) và thay đổi trạng thái hoạt động."
         actions={
-          <Button
-            variant="outline"
-            leftIcon={<RefreshCw className="size-4" />}
-            onClick={() => void usersQuery.refetch()}
-          >
-            Làm mới
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              leftIcon={<Plus className="size-4" />}
+              onClick={() => setCreateOpen(true)}
+            >
+              Tạo tài khoản CVA / Admin
+            </Button>
+            <Button
+              variant="outline"
+              leftIcon={<RefreshCw className="size-4" />}
+              onClick={() => void usersQuery.refetch()}
+            >
+              Làm mới
+            </Button>
+          </div>
         }
       />
 
@@ -183,6 +223,80 @@ export function AdminUsersPage() {
             </div>
           )}
         </SectionCard>
+      )}
+
+      {createOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/40 p-4 backdrop-blur-xs"
+          onClick={() => setCreateOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-ink-100 pb-4">
+              <div>
+                <h3 className="text-lg font-bold text-ink-900">Tạo tài khoản mới</h3>
+                <p className="text-xs text-ink-500">Cấp tài khoản thẩm định viên CVA hoặc quản trị viên Admin</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreateOpen(false)}
+                className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700"
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleCreateSubmit} className="mt-4 space-y-4">
+              <Input
+                label="Họ và tên"
+                placeholder="Trần Thị Thẩm Định"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+              />
+              <Input
+                label="Email"
+                type="email"
+                placeholder="cva@carbonx.vn"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <Input
+                label="Mật khẩu tạm"
+                type="password"
+                placeholder="Tối thiểu 8 ký tự"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <div>
+                <label htmlFor="provision-role" className="mb-1.5 block text-sm font-medium text-ink-700">
+                  Vai trò
+                </label>
+                <select
+                  id="provision-role"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value as StaffRole)}
+                  className="h-11 w-full rounded-xl border border-ink-200 bg-white px-3.5 text-sm text-ink-900"
+                >
+                  <option value="ROLE_CVA">Đơn vị thẩm định (CVA)</option>
+                  <option value="ROLE_ADMIN">Quản trị viên (Admin)</option>
+                  <option value="ROLE_COMPANY">Doanh nghiệp (Company)</option>
+                  <option value="ROLE_EV_OWNER">Chủ xe điện (EV Owner)</option>
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 border-t border-ink-100 pt-4">
+                <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+                  Huỷ
+                </Button>
+                <Button type="submit" loading={createMutation.isPending}>
+                  Tạo tài khoản
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {selectedUser && (

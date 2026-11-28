@@ -13,8 +13,12 @@ export interface ApiEnvelope<T> {
 }
 
 export interface AuthPayload {
+  accessToken?: string
+  refreshToken?: string
   jwt?: string
   token?: string
+  userId?: number
+  companyId?: number | null
   roles?: string[]
   role?: string
   message?: string

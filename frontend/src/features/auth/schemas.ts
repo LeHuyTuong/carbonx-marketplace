@@ -20,13 +20,18 @@ const passwordRule = z
 
 export const registerSchema = z
   .object({
+    fullName: z
+      .string()
+      .trim()
+      .min(2, 'Họ và tên phải có ít nhất 2 ký tự')
+      .max(191, 'Họ và tên tối đa 191 ký tự'),
     email: z
       .string()
       .min(1, 'Email không được để trống')
       .email('Email không đúng định dạng'),
     password: passwordRule,
     confirmPassword: z.string().min(1, 'Vui lòng xác nhận mật khẩu'),
-    roleName: z.enum(['EV_OWNER', 'CC_BUYER', 'CVA'], {
+    role: z.enum(['EV_OWNER', 'COMPANY'], {
       message: 'Vui lòng chọn vai trò',
     }),
   })

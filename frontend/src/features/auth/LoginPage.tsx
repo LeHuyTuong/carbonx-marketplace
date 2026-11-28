@@ -10,6 +10,7 @@ import type { AuthPayload } from '@/shared/api/types'
 import { Button } from '@/shared/components/Button'
 import { Input } from '@/shared/components/Input'
 import { decodeJwt } from '@/shared/lib/jwt'
+import { apiMessage } from '@/shared/lib/errors'
 import { normalizeRole, roleHome } from '@/shared/lib/roles'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { AuthShell } from './components/AuthShell'
@@ -42,7 +43,7 @@ export function LoginPage() {
   const loginMutation = useMutation({
     mutationFn: (values: LoginValues) => api.post<AuthPayload>('/auth/login', values),
     onSuccess: (payload) => {
-      const token = payload.jwt ?? payload.token
+      const token = payload.accessToken ?? payload.jwt ?? payload.token
       if (!token) {
         toast.error('Máy chủ không trả về token đăng nhập')
         return
@@ -74,6 +75,9 @@ export function LoginPage() {
       const canReturnToFrom = typeof from === 'string' && from.startsWith(targetHome)
       navigate(canReturnToFrom ? from : targetHome, { replace: true })
     },
+    onError: (err) => {
+      toast.error('Đăng nhập thất bại', { description: apiMessage(err) })
+    },
   })
 
   const handleQuickLogin = (email: string, pass: string) => {
@@ -88,7 +92,7 @@ export function LoginPage() {
     { role: 'EV_OWNER', label: 'Chủ xe điện', email: 'evowner@example.com', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' },
     { role: 'COMPANY', label: 'Doanh nghiệp', email: 'company@example.com', badge: 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' },
     { role: 'CVA', label: 'Đơn vị CVA', email: 'cva@example.com', badge: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100' },
-    { role: 'ADMIN', label: 'Quản trị viên', email: 'admin@gmail.com', badge: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100' },
+    { role: 'ADMIN', label: 'Quản trị viên', email: 'admin@carbonx.vn', badge: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100' },
   ] as const
 
   return (

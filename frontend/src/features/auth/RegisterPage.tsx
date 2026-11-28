@@ -8,13 +8,17 @@ import { api } from '@/shared/api/client'
 import type { AuthPayload } from '@/shared/api/types'
 import { Button } from '@/shared/components/Button'
 import { Input } from '@/shared/components/Input'
+import { decodeJwt } from '@/shared/lib/jwt'
+import { apiMessage } from '@/shared/lib/errors'
 import { cn } from '@/shared/lib/cn'
 import { normalizeRole, roleHome } from '@/shared/lib/roles'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { AuthShell } from './components/AuthShell'
 import { registerSchema, type RegisterValues } from './schemas'
 
 export function RegisterPage() {
   const navigate = useNavigate()
+  const setAuth = useAuthStore((state) => state.setAuth)
 
   const {
     register,
@@ -22,18 +26,43 @@ export function RegisterPage() {
     formState: { errors },
   } = useForm<RegisterValues>({
     resolver: zodResolver(registerSchema),
-    defaultValues: { email: '', password: '', confirmPassword: '', roleName: 'EV_OWNER' },
+    defaultValues: { fullName: '', email: '', password: '', confirmPassword: '', role: 'EV_OWNER' },
   })
 
   const registerMutation = useMutation({
-    mutationFn: (values: RegisterValues) => api.post<AuthPayload>('/auth/register', values),
-    onSuccess: (payload) => {
-      toast.success(
-        payload.message ?? 'Đăng ký thành công',
-        { description: 'Vui lòng kiểm tra email để xác thực OTP trước khi đăng nhập.' },
-      )
-      const role = normalizeRole(payload.roles?.[0] ?? payload.role)
-      navigate(role ? roleHome(role) : '/login', { replace: true })
+    mutationFn: (values: RegisterValues) =>
+      api.post<AuthPayload>('/auth/register', {
+        email: values.email.trim(),
+        password: values.password,
+        fullName: values.fullName.trim(),
+        role: values.role,
+      }),
+    onSuccess: (payload, values) => {
+      const token = payload.accessToken ?? payload.jwt ?? payload.token
+      const claims = token ? decodeJwt(token) : {}
+      const role = normalizeRole(payload.roles?.[0] ?? payload.role ?? claims.role ?? values.role)
+      if (token && role) {
+        setAuth({
+          token,
+          role,
+          user: {
+            id: claims.sub ?? claims.userId ?? payload.userId,
+            email: payload.email ?? claims.email ?? values.email,
+            fullName: claims.fullName ?? claims.name ?? values.fullName,
+            role,
+          },
+        })
+        toast.success(payload.message ?? 'Đăng ký thành công')
+        navigate(roleHome(role), { replace: true })
+        return
+      }
+      toast.success(payload.message ?? 'Đăng ký thành công', {
+        description: 'Vui lòng đăng nhập bằng tài khoản vừa tạo.',
+      })
+      navigate('/login', { replace: true })
+    },
+    onError: (err) => {
+      toast.error('Đăng ký thất bại', { description: apiMessage(err) })
     },
   })
 
@@ -56,6 +85,16 @@ export function RegisterPage() {
         className="mt-7 space-y-4"
       >
         <Input
+          label="Họ và tên"
+          type="text"
+          autoComplete="name"
+          placeholder="Nguyễn Văn A"
+          icon={<UserRound aria-hidden className="size-4" />}
+          error={errors.fullName?.message}
+          {...register('fullName')}
+        />
+
+        <Input
           label="Email"
           type="email"
           autoComplete="email"
@@ -66,30 +105,29 @@ export function RegisterPage() {
         />
 
         <div>
-          <label htmlFor="roleName" className="mb-1.5 block text-sm font-medium text-ink-700">
+          <label htmlFor="role" className="mb-1.5 block text-sm font-medium text-ink-700">
             Vai trò
           </label>
           <div className="relative">
             <UserRound aria-hidden className="pointer-events-none absolute left-3 top-3 size-4 text-ink-400" />
             <select
-              id="roleName"
-              aria-invalid={Boolean(errors.roleName)}
+              id="role"
+              aria-invalid={Boolean(errors.role)}
               className={cn(
                 'h-11 w-full appearance-none rounded-xl border bg-white pl-10 pr-3 text-sm text-ink-900 outline-none transition',
-                errors.roleName
+                errors.role
                   ? 'border-rose-400 focus:border-rose-500'
                   : 'border-ink-200 focus:border-brand-500',
               )}
-              {...register('roleName')}
+              {...register('role')}
             >
               <option value="EV_OWNER">Chủ xe điện (EV Owner)</option>
-              <option value="CC_BUYER">Doanh nghiệp mua tín chỉ</option>
-              <option value="CVA">Đơn vị thẩm định (CVA)</option>
+              <option value="COMPANY">Doanh nghiệp (Company)</option>
             </select>
           </div>
-          {errors.roleName?.message && (
+          {errors.role?.message && (
             <p role="alert" className="mt-1.5 text-xs font-medium text-rose-600">
-              {errors.roleName.message}
+              {errors.role.message}
             </p>
           )}
         </div>
