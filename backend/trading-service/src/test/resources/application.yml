@@ -1,0 +1,40 @@
+# Test-scoped configuration: unit tests construct the saga services directly and never contact
+# Config Server, Eureka, Kafka or MySQL. Secrets here are disposable test values.
+spring:
+  application:
+    name: trading-service
+  main:
+    banner-mode: off
+  cloud:
+    config:
+      enabled: false
+    discovery:
+      enabled: false
+    openfeign:
+      circuitbreaker:
+        enabled: false
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+carbonx:
+  security:
+    internal-token: carbonx-internal-test-token-at-least-32b
+    jwt:
+      secret: carbonx-trading-test-only-signing-secret-32b
+      issuer: carbonx-identity-test
+  saga:
+    recovery-interval-ms: 600000
+    recovery-batch-size: 50
+  outbox:
+    topic: trading.events
+    relay-interval-ms: 600000
+    relay-initial-delay-ms: 600000
+
+logging:
+  level:
+    root: WARN
+    com.carbonx.trading: INFO

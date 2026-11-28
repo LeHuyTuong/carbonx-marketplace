@@ -1,5 +1,8 @@
 server:
   port: 8084
+  error:
+    include-message: never
+    include-stacktrace: never
 
 spring:
   application:
@@ -14,11 +17,150 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
   flyway:
     enabled: true
     locations: classpath:db/migration
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      # Fail fast so a PENDING outbox row reaches DEAD_LETTER instead of blocking a relay tick.
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+        delivery.timeout.ms: 10000
+  cloud:
+    openfeign:
+      # RemoteSagaGateway & RegistryHoldingProjectionAdapter own CircuitBreaker + Retry + 4xx mapping.
+      circuitbreaker:
+        enabled: false
+      client:
+        config:
+          default:
+            connectTimeout: 2000
+            readTimeout: 5000
+
+carbonx:
+  security:
+    internal-token: ${INTERNAL_SERVICE_TOKEN:}
+    jwt:
+      # Fail-closed: no default secret. The service refuses to start with fewer than 32 bytes.
+      secret: ${JWT_SECRET:}
+      issuer: ${JWT_ISSUER:carbonx-identity}
+  saga:
+    recovery-interval-ms: ${SAGA_RECOVERY_INTERVAL_MS:30000}
+    recovery-batch-size: ${SAGA_RECOVERY_BATCH_SIZE:50}
+  outbox:
+    topic: ${TRADING_EVENTS_TOPIC:trading.events}
+    relay-interval-ms: ${OUTBOX_RELAY_INTERVAL_MS:2000}
+    relay-initial-delay-ms: ${OUTBOX_RELAY_INITIAL_DELAY_MS:5000}
+  clients:
+    ledger:
+      base-url: ${LEDGER_SERVICE_URL:}
+    registry:
+      base-url: ${REGISTRY_SERVICE_URL:}
+
+resilience4j:
+  circuitbreaker:
+    circuit-breaker-aspect-order: 1
+    configs:
+      default:
+        ignore-exceptions:
+          - com.carbonx.trading.application.exception.TradingApplicationException
+    instances:
+      ledgerSettlement:
+        base-config: default
+        sliding-window-size: 20
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
+      ledgerRefund:
+        base-config: default
+        sliding-window-size: 10
+        minimum-number-of-calls: 3
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        register-health-indicator: true
+      registryLock:
+        base-config: default
+        sliding-window-size: 20
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
+      registryTransfer:
+        base-config: default
+        sliding-window-size: 20
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
+      registryHoldings:
+        base-config: default
+        sliding-window-size: 20
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+        register-health-indicator: true
+  retry:
+    retry-aspect-order: 2
+    instances:
+      ledgerSettlement:
+        max-attempts: 2
+        wait-duration: 200ms
+        ignore-exceptions: &retry_ignore_exceptions
+          - com.carbonx.trading.application.exception.TradingApplicationException
+        retry-exceptions: &retry_exceptions
+          - feign.RetryableException
+          - feign.FeignException$FeignServerException
+          - java.io.IOException
+      ledgerRefund:
+        max-attempts: 3
+        wait-duration: 300ms
+        ignore-exceptions: *retry_ignore_exceptions
+        retry-exceptions: *retry_exceptions
+      registryLock:
+        max-attempts: 3
+        wait-duration: 200ms
+        ignore-exceptions: *retry_ignore_exceptions
+        retry-exceptions: *retry_exceptions
+      registryTransfer:
+        max-attempts: 3
+        wait-duration: 200ms
+        ignore-exceptions: *retry_ignore_exceptions
+        retry-exceptions: *retry_exceptions
+      registryHoldings:
+        max-attempts: 2
+        wait-duration: 200ms
+        ignore-exceptions: *retry_ignore_exceptions
+        retry-exceptions: *retry_exceptions
+  bulkhead:
+    instances:
+      ledgerSettlement:
+        max-concurrent-calls: 20
+        max-wait-duration: 100ms
+      registryLock:
+        max-concurrent-calls: 20
+        max-wait-duration: 100ms
+  ratelimiter:
+    instances:
+      registryTransfer:
+        limit-for-period: 50
+        limit-refresh-period: 1s
+        timeout-duration: 200ms
 
 eureka:
   client:
@@ -29,4 +171,8 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus,refresh,busrefresh,circuitbreakers
+        include: health,info,metrics,prometheus,refresh,busrefresh,circuitbreakers,circuitbreakerevents
+  endpoint:
+    health:
+      probes:
+        enabled: true
