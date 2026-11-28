@@ -51,8 +51,9 @@ Task nào đi ngược file này thì dừng lại và hỏi.
 
 ## 5. Dữ liệu và quy ước
 ### Quyết định
-- Mô hình thực thể khái niệm hợp nhất được định nghĩa tại `docs/diagrams/conceptual-erd.drawio` với thực thể lõi là `Lô tín chỉ` (19 thực thể nghiệp vụ, 18 quan hệ, 0 chu trình).
-- Quản lý lược đồ cơ sở dữ liệu hoàn toàn bằng **Flyway** (`src/main/resources/db/migration/V1..Vn`), đặt `spring.jpa.hibernate.ddl-auto=validate` ở môi trường production.
+- Mô hình thực thể khái niệm hợp nhất bằng tiếng Anh được định nghĩa tại `docs/diagrams/conceptual-erd.drawio` với thực thể lõi `Credit Batches` (21 thực thể, 20 quan hệ, 0 chu trình) và tách thành 5 sơ đồ độc lập theo service tại `docs/diagrams/services/01..05`.
+- Giải quyết triệt để 2 bài toán cốt lõi của sàn carbon: (1) `Credit Batches` tách thành `Credit Holdings` (tách phần sở hữu khi bán 80 / giữ 20 để triệt tiêu mà không sửa lô gốc) kèm sổ cái serial `Credit Movements`; (2) `Profit Distributions` sinh `Payout Items` lưu rõ `creditBatchId`, `batchCode`, `serialRange` và `sourceReportId` để chủ xe điện truy vết chính xác từng đồng tiền nhận vào `Wallets`.
+- Quản lý lược đồ cơ sở dữ liệu hoàn toàn bằng **Flyway** (`src/main/resources/db/migration/V1..Vn`), đặt `spring.jpa.hibernate.ddl-auto=validate` ở môi trường production; tên thực thể, bảng và code thống nhất tiếng Anh.
 - Mỗi Bounded Context sở hữu nhóm bảng riêng và tham chiếu sang module khác bằng định danh (`UUID`/`Long` ID), không tạo khoá ngoại vật lý chéo giữa các module.
 ### Lý do
 - Tách quyền sở hữu bảng và bỏ khoá ngoại chéo giúp việc bóc tách cơ sở dữ liệu theo từng microservice ở Pha 2 diễn ra không cần viết lại truy vấn.
