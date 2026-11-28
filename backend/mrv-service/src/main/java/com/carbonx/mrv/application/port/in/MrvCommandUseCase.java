@@ -5,6 +5,8 @@ import java.math.BigDecimal;
 
 public interface MrvCommandUseCase {
     Long createProject(Long adminId, String title, String description, BigDecimal emissionFactor, BigDecimal bufferRate, BigDecimal uncertaintyRate, BigDecimal leakageRate);
+    void updateProject(Long adminId, Long projectId, String title, String description, String status, BigDecimal emissionFactor, BigDecimal bufferRate, BigDecimal uncertaintyRate, BigDecimal leakageRate);
+    void deleteProject(Long adminId, Long projectId);
     Long submitApplication(Long companyId, Long projectId, String documentUrl);
     void reviewApplicationByCva(Long cvaUserId, Long applicationId, String outcome, String note);
     void reviewApplicationByAdmin(Long adminUserId, Long applicationId, String outcome, String note);

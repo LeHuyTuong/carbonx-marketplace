@@ -1,0 +1,48 @@
+# Test-scoped configuration: replaces the service application.yml so unit/slice tests never
+# contact Config Server, Eureka, Kafka, MySQL or an LLM. Secrets here are disposable test values.
+spring:
+  application:
+    name: mrv-service
+  main:
+    banner-mode: off
+  cloud:
+    config:
+      enabled: false
+    discovery:
+      enabled: false
+    openfeign:
+      circuitbreaker:
+        enabled: true
+  kafka:
+    bootstrap-servers: localhost:9092
+  ai:
+    openai:
+      api-key: test-only-key
+
+eureka:
+  client:
+    enabled: false
+    register-with-eureka: false
+    fetch-registry: false
+
+carbonx:
+  security:
+    internal-token: carbonx-internal-test-only-token-32b
+    jwt:
+      secret: carbonx-mrv-test-only-signing-secret-32b
+      issuer: carbonx-identity-test
+  outbox:
+    topic: mrv.events
+    relay-interval-ms: 600000
+    relay-initial-delay-ms: 600000
+  ai:
+    timeout-seconds: 1
+    fallback-version: rules-dq1-dq8-v1
+  clients:
+    identity:
+      base-url: http://localhost:18081
+
+logging:
+  level:
+    root: WARN
+    com.carbonx.mrv: INFO

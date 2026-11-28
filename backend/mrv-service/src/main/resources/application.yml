@@ -1,11 +1,19 @@
 server:
   port: 8082
+  error:
+    include-message: never
+    include-stacktrace: never
 
 spring:
   application:
     name: mrv-service
   config:
     import: "optional:configserver:${CONFIG_SERVER_URI:http://localhost:8888}"
+  servlet:
+    multipart:
+      # The command service enforces the same limit defensively (5 MiB) on the byte stream.
+      max-file-size: 5MB
+      max-request-size: 6MB
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://127.0.0.1:3306/carbonx_mrv?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&createDatabaseIfNotExist=true}
     username: ${SPRING_DATASOURCE_USERNAME:root}
@@ -14,11 +22,122 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
   flyway:
     enabled: true
     locations: classpath:db/migration
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      # Fail fast so a PENDING outbox row reaches DEAD_LETTER instead of blocking a relay tick.
+      properties:
+        enable.idempotence: true
+        max.block.ms: 5000
+        delivery.timeout.ms: 10000
+  task:
+    scheduling:
+      # Spring Cloud Bus (Kafka binder) retries on the scheduled pool; a single thread would
+      # starve any scheduled work whenever the broker is unreachable.
+      pool:
+        size: 4
+      thread-name-prefix: carbonx-sched-
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
+      client:
+        config:
+          default:
+            connectTimeout: 2000
+            readTimeout: 5000
+  ai:
+    openai:
+      # The platform env contract is AI_API_KEY/AI_BASE_URL/AI_MODEL (OpenAI-compatible providers:
+      # Gemini, DeepSeek, OpenAI). The OPENAI_* names stay as a local fallback. The placeholder key
+      # keeps startup independent of the provider: without a real key the call fails fast, the
+      # aiScoring breaker opens and the DQ1..DQ8 fallback score is returned.
+      api-key: ${AI_API_KEY:${OPENAI_API_KEY:not-configured}}
+      base-url: ${AI_BASE_URL:${OPENAI_BASE_URL:https://api.openai.com}}
+      chat:
+        options:
+          model: ${AI_MODEL:${OPENAI_MODEL:gpt-4o-mini}}
+          temperature: 0.1
+    retry:
+      # Never let Spring AI hammer an unhealthy provider: the Resilience4j breaker owns recovery.
+      max-attempts: 2
+      on-client-errors: false
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      aiScoring:
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 2
+        registerHealthIndicator: true
+      aiChat:
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 60s
+        permittedNumberOfCallsInHalfOpenState: 2
+        registerHealthIndicator: true
+      identityService:
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 20s
+        permittedNumberOfCallsInHalfOpenState: 3
+        registerHealthIndicator: true
+        # 404 / not-KYC-approved are business answers, not provider failures.
+        ignoreExceptions:
+          - com.carbonx.mrv.application.exception.MrvApplicationException
+  retry:
+    instances:
+      identityService:
+        maxAttempts: 3
+        waitDuration: 300ms
+        retryExceptions:
+          - feign.RetryableException
+          - java.io.IOException
+  bulkhead:
+    instances:
+      aiScoring:
+        maxConcurrentCalls: 4
+        maxWaitDuration: 100ms
+  ratelimiter:
+    instances:
+      aiChat:
+        limitForPeriod: 20
+        limitRefreshPeriod: 1m
+        timeoutDuration: 0
+
+carbonx:
+  security:
+    internal-token: ${INTERNAL_SERVICE_TOKEN:}
+    jwt:
+      # Fail-closed: no default secret. The service refuses to start with fewer than 32 bytes.
+      secret: ${JWT_SECRET:}
+      issuer: ${JWT_ISSUER:carbonx-identity}
+  outbox:
+    topic: ${MRV_EVENTS_TOPIC:mrv.events}
+    relay-interval-ms: ${OUTBOX_RELAY_INTERVAL_MS:2000}
+    relay-initial-delay-ms: ${OUTBOX_RELAY_INITIAL_DELAY_MS:5000}
+  ai:
+    timeout-seconds: ${AI_TIMEOUT_SECONDS:15}
+    fallback-version: ${AI_FALLBACK_VERSION:rules-dq1-dq8-v1}
+  clients:
+    identity:
+      # Empty = resolve identity-service through Eureka/LoadBalancer.
+      base-url: ${IDENTITY_SERVICE_URL:}
 
 eureka:
   client:
@@ -30,3 +149,7 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus,refresh,busrefresh,circuitbreakers
+  endpoint:
+    health:
+      probes:
+        enabled: true
