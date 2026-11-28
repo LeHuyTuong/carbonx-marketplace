@@ -42,6 +42,15 @@ public final class IntegrationEvents {
         public String eventType() { return "trading.order.settled"; }
     }
 
+    public record OrderCompensatedEvent(
+            String sagaId, Long orderId, String orderCode, Long listingId,
+            String failedStep, String reason
+    ) implements DomainEvent {
+        public String aggregateType() { return "OrderSaga"; }
+        public String aggregateId() { return sagaId; }
+        public String eventType() { return "trading.order.compensated"; }
+    }
+
     public record ProfitDistributedEvent(
             Long distributionId, Long sourceReportId, Long creditBatchId, String batchCode,
             String period, int recipientCount, BigDecimal totalPayoutUsd

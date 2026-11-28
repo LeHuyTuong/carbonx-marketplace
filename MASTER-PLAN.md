@@ -29,17 +29,17 @@ Task nào đi ngược file này thì dừng lại và hỏi.
 
 ## 3. Design pattern
 ### Quyết định
-- Pattern đã chọn: **BFF (Backend for Frontend)** + **Database-per-Service** + **Pragmatic DDD** + **Logical CQRS** (`*CommandUseCase` tách biệt `*QueryUseCase`) + **Saga Pattern** (Orchestration kết hợp Compensating Transactions) + **Transactional Outbox** + **Resilience4j** (Circuit Breaker, Retry, Rate Limiter, Bulkhead) + Idempotency Key.
-- Áp tới mức nào: Tầng **BFF** tách riêng `web-bff` (`/api/web/**` gom bảng điều khiển đa service giàu dữ liệu cho Admin/CVA/Company) và `mobile-bff` (`/api/mobile/**` nén payload JSON gọn nhẹ cho mạng 4G/5G, gộp 1 request màn hình chính Chủ xe điện, cấp Presigned URL chụp ảnh KYC/xe lên S3 và đăng ký FCM/APNs token); giao dịch liên service (Mua tín chỉ giữa `trading`, `registry`, `ledger`) dùng Order Saga + OpenFeign/Kafka + Idempotency Key + Outbox; luồng trong nội bộ 1 service (`Wallet`, `CreditHolding`) dùng khoá bi quan `FOR UPDATE` + 1 DB transaction cục bộ; mọi lời gọi từ BFF hoặc giữa các service bắt buộc bọc Resilience4j.
-- Khi sập: Một service phụ trên màn tổng quan chậm/lỗi thì BFF trả dữ liệu từng phần (graceful degradation) thay vì làm trắng toàn màn hình Mobile/Web; bước sau trong Order Saga thất bại thì kích hoạt giao dịch bù trừ hoàn khoá `CreditHolding` / hoàn tiền ví; LLM lỗi thì Circuit Breaker `aiScoring` mở mạch và trả điểm fallback từ 8 luật gian lận; sự kiện Outbox lỗi quá 5 lần chuyển sang `DEAD_LETTER` và phát cảnh báo cho đội vận hành.
+- Pattern đã chọn: **BFF (Backend for Frontend)** + **Database-per-Service** (không cross-DB `JOIN`) + **Pragmatic DDD** + **Logical CQRS** (`*CommandUseCase`, `*QueryUseCase` & Read Projections từ Kafka) + **Saga Orchestration** (6 trạng thái chuẩn `PENDING → EXECUTING → COMPLETED | FAILED → COMPENSATING → COMPENSATED`, chọn thay thế 2PC/XA để không khóa CSDL phân tán) + **Transactional Outbox** + **Resilience4j** (Circuit Breaker `CLOSED/OPEN/HALF-OPEN`, Retry, Rate Limiter, Bulkhead + OpenFeign fallback) + Idempotency Key.
+- Áp tới mức nào: Tầng **BFF** tách riêng `web-bff` (`/api/web/**` gom bảng điều khiển đa service giàu dữ liệu cho Admin/CVA/Company kèm Read Projection báo cáo) và `mobile-bff` (`/api/mobile/**` nén payload JSON gọn nhẹ cho mạng 4G/5G, gộp 1 request màn hình chính Chủ xe điện, cấp Presigned URL chụp ảnh KYC/xe lên S3 và đăng ký FCM/APNs token); giao dịch liên service (Mua tín chỉ giữa `trading`, `registry`, `ledger`) dùng **Order Saga Orchestrator** tách khỏi logic nghiệp vụ chi tiết (lưu trạng thái 6 pha tại `order_saga_instances`, phát sự kiện qua `outbox_events` → Kafka, mọi bước bù trừ đảm bảo *Idempotent – Reversible – Reliable*); luồng trong nội bộ 1 service (`Wallet`, `CreditHolding`) dùng khoá bi quan `FOR UPDATE` + 1 DB transaction cục bộ; dữ liệu tham chiếu tĩnh đọc qua Redis cache (`StaticReferenceCachePort`).
+- Khi sập: Service phụ chậm/lỗi thì Resilience4j ngắt mạch (`OPEN` Fail Fast) trả fallback và BFF trả `partialData = true`; bước sau trong Order Saga thất bại thì chuyển `FAILED → COMPENSATING`, chạy chuỗi bù trừ ngược chiều rồi chuyển `COMPENSATED` + phát `OrderCompensatedEvent` qua Outbox; LLM lỗi thì Circuit Breaker `aiScoring` mở mạch trả điểm fallback từ 8 luật `DQ1..DQ8`; bản ghi Outbox lỗi quá 5 lần chuyển `DEAD_LETTER` cảnh báo đội vận hành.
 ### Lý do
-- Kết hợp BFF, Saga, Outbox, CQRS và Resilience4j vừa triệt tiêu hiện tượng over-fetching/chatty requests trên ứng dụng Mobile mà không làm phình `api-gateway`, vừa đảm bảo giao dịch phân tán an toàn và chống lỗi sập dây chuyền (Cascading Failure).
+- Kết hợp BFF, Saga Orchestration (non-blocking, thay thế 2PC), Outbox, CQRS Read Projections và Resilience4j vừa triệt tiêu cross-DB join và over-fetching trên Mobile, vừa bảo toàn nhất quán cuối cùng (Eventual Consistency) và chống lỗi sập dây chuyền (Cascading Failure).
 ### Luật
 - Luôn tách riêng interface `*CommandUseCase` và `*QueryUseCase` trong gói `application.port.in` của mỗi microservice và mỗi BFF.
 - Không bao giờ cấp cơ sở dữ liệu riêng hay đặt luật nghiệp vụ lõi (tính tiền, phát hành tín chỉ, duyệt MRV) bên trong `web-bff` hoặc `mobile-bff`.
-- Luôn định nghĩa giao dịch bù trừ (compensating action) và `Idempotency-Key` cho mọi bước thay đổi trạng thái trong Saga.
-- Luôn bọc `Resilience4j` kèm fallback cho mọi `@FeignClient`, lời gọi Spring AI và cổng thanh toán bên ngoài.
-- Không bao giờ để hai microservice đọc hoặc ghi chung một cơ sở dữ liệu vật lý.
+- Luôn quản lý vòng đời Saga qua 6 trạng thái (`PENDING`, `EXECUTING`, `COMPLETED`, `FAILED`, `COMPENSATING`, `COMPENSATED`), định nghĩa giao dịch bù trừ (*Idempotent, Reversible, Reliable*), không đưa logic tính toán chi tiết vào Orchestrator, và ghi nhận sự kiện kết quả qua `OutboxPort`.
+- Luôn bật `spring.cloud.openfeign.circuitbreaker.enabled=true` và bọc `Resilience4j` kèm fallback cho mọi `@FeignClient`, lời gọi Spring AI và cổng thanh toán bên ngoài; tuyệt đối dùng Constructor Injection (cấm `@Autowired` field injection).
+- Không bao giờ để hai microservice đọc/ghi chung một CSDL vật lý hay thực hiện SQL `JOIN` chéo giữa các Bounded Context.
 
 ## 4. UI
 ### Quyết định
@@ -56,8 +56,8 @@ Task nào đi ngược file này thì dừng lại và hỏi.
 ### Quyết định
 - Mô hình thực thể khái niệm hợp nhất bằng tiếng Anh được định nghĩa tại `docs/diagrams/conceptual-erd.drawio` với thực thể lõi `Credit Batches` (21 thực thể, 20 quan hệ, 0 chu trình) và tách thành 5 sơ đồ độc lập theo service tại `docs/diagrams/services/01..05`.
 - Giải quyết triệt để 2 bài toán cốt lõi của sàn carbon: (1) `Credit Batches` tách thành `Credit Holdings` (tách phần sở hữu khi bán 80 / giữ 20 để triệt tiêu mà không sửa lô gốc) kèm sổ cái serial `Credit Movements`; (2) `Profit Distributions` sinh `Payout Items` lưu rõ `creditBatchId`, `batchCode`, `serialRange` và `sourceReportId` để chủ xe điện truy vết chính xác từng đồng tiền nhận vào `Wallets`.
-- Quản lý lược đồ cơ sở dữ liệu hoàn toàn bằng **Flyway** (`src/main/resources/db/migration/V1..Vn`), đặt `spring.jpa.hibernate.ddl-auto=validate` ở môi trường production; tên thực thể, bảng và code thống nhất tiếng Anh.
-- Mỗi Bounded Context sở hữu nhóm bảng riêng và tham chiếu sang module khác bằng định danh (`UUID`/`Long` ID), không tạo khoá ngoại vật lý chéo giữa các module.
+- Quản lý lược đồ cơ sở dữ liệu hoàn toàn bằng **Flyway** (`src/main/resources/db/migration/V1..Vn`, bao gồm `V2__saga_orchestration_state.sql` cho máy trạng thái 6 pha của Order Saga trong `trading-service`), đặt `spring.jpa.hibernate.ddl-auto=validate` ở môi trường production; tên thực thể, bảng và code thống nhất tiếng Anh.
+- Mỗi Bounded Context sở hữu nhóm bảng riêng (**Database-per-Service**), không có khoá ngoại vật lý hay SQL `JOIN` chéo; dữ liệu báo cáo/hiển thị liên service sử dụng snapshot trong `market_listings`/`payout_items`, bảng chiếu CQRS đồng bộ từ Kafka Data Events, hoặc bộ nhớ đệm tham chiếu tĩnh trên Redis (`StaticReferenceCachePort`).
 ### Lý do
 - Tách quyền sở hữu bảng và bỏ khoá ngoại chéo giúp việc bóc tách cơ sở dữ liệu theo từng microservice ở Pha 2 diễn ra không cần viết lại truy vấn.
 ### Luật

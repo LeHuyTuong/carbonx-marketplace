@@ -33,7 +33,7 @@ LUẬT CLEAN CODE & KIẾN TRÚC BẮT BUỘC (`ServiceArchitectureTest` chạy 
 - `@RestController` chỉ gọi `*CommandUseCase` / `*QueryUseCase`, CẤM gọi thẳng `..infrastructure..` / Repository và CẤM trả trực tiếp class `@Entity`.
 - Tầng `..domain..` thuần khiết, CẤM import `..api..` hoặc `..infrastructure..`.
 - CẤM `@Autowired` field injection (chỉ dùng Constructor Injection `@RequiredArgsConstructor`), CẤM `System.out`/`printStackTrace`.
-- Mọi `@FeignClient`, lời gọi `Spring AI ChatClient`, và cổng thanh toán phải bọc `Resilience4j` (`@CircuitBreaker`, `@Retry`, `@RateLimiter`, `@Bulkhead`) kèm hàm fallback rõ ràng.
+- Mọi `@FeignClient`, lời gọi `Spring AI ChatClient`, và cổng thanh toán phải cấu hình `spring.cloud.openfeign.circuitbreaker.enabled=true` và bọc `Resilience4j` (`@CircuitBreaker`, `@Retry`, `@RateLimiter`, `@Bulkhead`) kèm class `fallback` / `fallbackMethod` rõ ràng; tuyệt đối không dùng `@Autowired` field injection.
 - Sau mỗi prompt, bắt buộc chạy `cd backend && mvn test -B` xanh 12/12 modules trước khi báo hoàn tất.
 ```
 
@@ -79,17 +79,17 @@ Triển khai hoàn chỉnh `backend/registry-service` khớp `V1__init_registry.
 
 ---
 
-## Prompt 4 — `trading-service` (`:8084`, DB `carbonx_trading` + **Order Saga Orchestrator**)
+## Prompt 4 — `trading-service` (`:8084`, DB `carbonx_trading` + **6-State Saga Orchestrator + Outbox**)
 
 ```text
-Triển khai hoàn chỉnh `backend/trading-service` khớp `V1__init_trading.sql`:
-1. Implement `TradingCommandUseCase`, `TradingQueryUseCase`, và `OrderSagaRemotePorts` (qua `@FeignClient("ledger-service")` & `@FeignClient("registry-service")` bọc Resilience4j).
-2. `executeInstantBuyOrderSaga` (`POST /api/v1/orders` — thanh toán tức thì 1 bước cho người dùng):
-   - Bước 1: Kiểm tra `idempotencyKey` + khoá `MarketListing` (`FOR UPDATE`), tạo `ListingReservation(RESERVED)`.
-   - Bước 2: Gọi `ledger-service` trừ ví người mua & cộng ví người bán (`debitBuyerAndCreditSeller`). Nếu lỗi -> mở khoá `MarketListing` (`RELEASED`) và trả lỗi.
-   - Bước 3: Gọi `registry-service` chuyển `CreditHolding` sang người mua (`transferCreditsToBuyer`). Nếu lỗi -> gọi **Compensating Transaction** `compensateRefundWalletSettlement` ở `ledger-service` + mở khoá `MarketListing`!
-   - Bước 4: Đánh dấu `ListingReservation(COMMITTED)`, lưu `TradeOrder(FINISHED)` và phát `OrderSettledEvent` vào Outbox -> Kafka.
-3. Viết test Saga thành công + test Saga kích hoạt giao dịch bù trừ hoàn tiền khi `registry-service` lỗi + test đồng thời 8 luồng; chạy `cd backend && mvn test -pl trading-service -am -B` xanh 100%.
+Triển khai hoàn chỉnh `backend/trading-service` khớp `V1__init_trading.sql` và `V2__saga_orchestration_state.sql` (BẮT BUỘC không dùng 2PC/XA, chỉ dùng Constructor Injection, CẤM @Autowired):
+1. Implement `TradingCommandUseCase`, `TradingQueryUseCase`, `OrderSagaOrchestratorPort`, `OrderCompensationPort`, và `OrderSagaRemotePorts` (qua `@FeignClient(name = "ledger-service", fallback = ...)` & `@FeignClient(name = "registry-service", fallback = ...)` đã bật `spring.cloud.openfeign.circuitbreaker.enabled=true`).
+2. Vòng đời 6 trạng thái chuẩn (`OrderSagaState`: `PENDING -> EXECUTING -> COMPLETED` hoặc `FAILED -> COMPENSATING -> COMPENSATED`) lưu tại `order_saga_instances` + `order_saga_transition_logs` (chỉ điều phối trạng thái/timeout/retry, KHÔNG nhét công thức tính thuế/phí chi tiết vào Orchestrator):
+   - Bước 1 (`RESERVE_LISTING`): `PENDING -> EXECUTING`, kiểm tra `idempotencyKey`, khoá `MarketListing` (`FOR UPDATE`), tạo `ListingReservation(RESERVED)` + `TradeOrder(PENDING)`.
+   - Bước 2 (`SETTLE_PAYMENT`): gọi `ledger-service` (`settleOrderPayment`). Nếu lỗi -> `FAILED -> COMPENSATING` -> `compensateCancelOrderAndReleaseListing` (`CANCELLED`) -> `COMPENSATED`.
+   - Bước 3 (`TRANSFER_CREDITS`): gọi `registry-service` (`transferLockedCredits`). Nếu lỗi -> `FAILED -> COMPENSATING`: gọi ngược chiều `compensateRefundWalletSettlement` (Idempotent, Reversible, Reliable) -> `compensateCancelOrderAndReleaseListing` -> `COMPENSATED` + ghi `OrderCompensatedEvent` vào `outbox_events`!
+   - Bước 4 (`FINALIZE_ORDER`): lưu `ListingReservation(COMMITTED)`, `TradeOrder(FINISHED)`, chuyển Saga sang `COMPLETED` và ghi `OrderSettledEvent` vào `outbox_events` trong cùng 1 local DB commit -> Kafka.
+3. Viết test Saga happy path (`COMPLETED`), test Saga bù trừ ngược (`COMPENSATED` khi `registry-service` lỗi kèm re-play idempotent), test Circuit Breaker `OPEN -> Fallback` và test đồng thời 8 luồng; chạy `cd backend && mvn test -pl trading-service -am -B` xanh 100%.
 ```
 
 ---

@@ -1,28 +1,86 @@
+spring:
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
+
 resilience4j:
   circuitbreaker:
     configs:
       default:
-        slidingWindowSize: 20
+        registerHealthIndicator: true
+        slidingWindowType: COUNT_BASED
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
         failureRateThreshold: 50
-        waitDurationInOpenState: 10s
+        waitDurationInOpenState: 10000ms
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+    instances:
+      aiScoring:
+        baseConfig: default
+        slidingWindowSize: 10
+        waitDurationInOpenState: 15000ms
+      aiChat:
+        baseConfig: default
+      ledgerSagaClient:
+        baseConfig: default
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10000ms
+      registrySagaClient:
+        baseConfig: default
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10000ms
+      identityClient:
+        baseConfig: default
+      paymentGateway:
+        baseConfig: default
+      webBffClient:
+        baseConfig: default
+        slidingWindowSize: 20
+      mobileBffClient:
+        baseConfig: default
+        waitDurationInOpenState: 5000ms
+
   retry:
     configs:
       default:
         maxAttempts: 3
         waitDuration: 500ms
+        retryExceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+    instances:
+      sagaCompensation:
+        maxAttempts: 5
+        waitDuration: 1000ms
+
   ratelimiter:
     configs:
       default:
         limitForPeriod: 50
         limitRefreshPeriod: 60s
         timeoutDuration: 0s
+    instances:
+      aiChat:
+        limitForPeriod: 20
+        limitRefreshPeriod: 60s
+
   bulkhead:
     configs:
       default:
         maxConcurrentCalls: 25
         maxWaitDuration: 0ms
+    instances:
+      aiScoring:
+        maxConcurrentCalls: 10
+      webBffAgg:
+        maxConcurrentCalls: 40
 
 management:
+  health:
+    circuitbreakers:
+      enabled: true
   tracing:
     sampling:
       probability: 1.0
