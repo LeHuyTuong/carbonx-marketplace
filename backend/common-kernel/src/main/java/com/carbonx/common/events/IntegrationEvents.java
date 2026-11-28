@@ -8,9 +8,12 @@ public final class IntegrationEvents {
     private IntegrationEvents() {}
 
     public record VehicleRegisteredEvent(Long vehicleId, Long evOwnerId, Long companyId, String plateNumber, String brand, String model) implements DomainEvent {
-        public String aggregateType() { return "Vehicle"; }
+        @Override
+        public String aggregateType() { return IntegrationAggregateType.VEHICLE.wireName(); }
+        @Override
         public String aggregateId() { return String.valueOf(vehicleId); }
-        public String eventType() { return "identity.vehicle.registered"; }
+        @Override
+        public String eventType() { return IntegrationEventType.IDENTITY_VEHICLE_REGISTERED.wireName(); }
     }
 
     public record EmissionReportApprovedEvent(
@@ -18,18 +21,24 @@ public final class IntegrationEvents {
             BigDecimal totalEnergyKwh, BigDecimal totalCo2Kg, BigDecimal emissionFactor,
             BigDecimal bufferRate, BigDecimal uncertaintyRate, BigDecimal leakageRate
     ) implements DomainEvent {
-        public String aggregateType() { return "EmissionReport"; }
+        @Override
+        public String aggregateType() { return IntegrationAggregateType.EMISSION_REPORT.wireName(); }
+        @Override
         public String aggregateId() { return String.valueOf(reportId); }
-        public String eventType() { return "mrv.emission-report.approved"; }
+        @Override
+        public String eventType() { return IntegrationEventType.MRV_EMISSION_REPORT_APPROVED.wireName(); }
     }
 
     public record CreditBatchIssuedEvent(
             Long batchId, String batchCode, Long sourceReportId, Long issuerCompanyId,
             long totalIssuedQty, long serialStart, long serialEnd
     ) implements DomainEvent {
-        public String aggregateType() { return "CreditBatch"; }
+        @Override
+        public String aggregateType() { return IntegrationAggregateType.CREDIT_BATCH.wireName(); }
+        @Override
         public String aggregateId() { return String.valueOf(batchId); }
-        public String eventType() { return "registry.credit-batch.issued"; }
+        @Override
+        public String eventType() { return IntegrationEventType.REGISTRY_CREDIT_BATCH_ISSUED.wireName(); }
     }
 
     public record OrderSettledEvent(
@@ -37,26 +46,35 @@ public final class IntegrationEvents {
             Long buyerCompanyId, Long sellerCompanyId, long quantity,
             BigDecimal grossAmount, BigDecimal platformFee
     ) implements DomainEvent {
-        public String aggregateType() { return "TradeOrder"; }
+        @Override
+        public String aggregateType() { return IntegrationAggregateType.TRADE_ORDER.wireName(); }
+        @Override
         public String aggregateId() { return String.valueOf(orderId); }
-        public String eventType() { return "trading.order.settled"; }
+        @Override
+        public String eventType() { return IntegrationEventType.TRADING_ORDER_SETTLED.wireName(); }
     }
 
     public record OrderCompensatedEvent(
             String sagaId, Long orderId, String orderCode, Long listingId,
             String failedStep, String reason
     ) implements DomainEvent {
-        public String aggregateType() { return "OrderSaga"; }
+        @Override
+        public String aggregateType() { return IntegrationAggregateType.ORDER_SAGA.wireName(); }
+        @Override
         public String aggregateId() { return sagaId; }
-        public String eventType() { return "trading.order.compensated"; }
+        @Override
+        public String eventType() { return IntegrationEventType.TRADING_ORDER_COMPENSATED.wireName(); }
     }
 
     public record ProfitDistributedEvent(
             Long distributionId, Long sourceReportId, Long creditBatchId, String batchCode,
             String period, int recipientCount, BigDecimal totalPayoutUsd
     ) implements DomainEvent {
-        public String aggregateType() { return "ProfitDistribution"; }
+        @Override
+        public String aggregateType() { return IntegrationAggregateType.PROFIT_DISTRIBUTION.wireName(); }
+        @Override
         public String aggregateId() { return String.valueOf(distributionId); }
-        public String eventType() { return "ledger.profit.distributed"; }
+        @Override
+        public String eventType() { return IntegrationEventType.LEDGER_PROFIT_DISTRIBUTED.wireName(); }
     }
 }
