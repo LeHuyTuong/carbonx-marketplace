@@ -1,0 +1,24 @@
+<mxfile host="drawio" agent="dsh diagram-builder" version="31.4.5">
+  <diagram id="D-ch-v-5-S-c-i-v-Thanh-to-n" name="Dịch vụ 5 — Sổ cái và Thanh toán">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="Dịch vụ 5 — Sổ cái và Thanh toán" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;strokeColor=none;fillColor=none;fontSize=15;fontStyle=1;erdLang=vi;" vertex="1" parent="1"><mxGeometry x="0" y="0" width="631.2" height="30" as="geometry"/></mxCell>
+        <mxCell id="c1" value="Ví điện tử" style="rounded=0;whiteSpace=wrap;html=1;strokeWidth=3;" vertex="1" parent="1"><mxGeometry x="198" y="186" width="66" height="66" as="geometry"/></mxCell>
+        <mxCell id="c2" value="Giao&lt;br&gt;dịch ví" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="374" y="186" width="66" height="66" as="geometry"/></mxCell>
+        <mxCell id="c3" value="Yêu cầu&lt;br&gt;rút tiền" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="374" y="60" width="66" height="66" as="geometry"/></mxCell>
+        <mxCell id="c4" value="Tài khoản&lt;br&gt;ngân&lt;br&gt;hàng" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="198" y="60" width="66" height="66" as="geometry"/></mxCell>
+        <mxCell id="c5" value="Đợt chia&lt;br&gt;doanh&lt;br&gt;thu" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="10" y="60" width="66" height="66" as="geometry"/></mxCell>
+        <mxCell id="c6" value="Chi tiết&lt;br&gt;chi trả" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="10" y="186" width="66" height="66" as="geometry"/></mxCell>
+        <mxCell id="c7" value="ghi nhận ▸" style="startArrow=ERmandOne;startFill=1;endArrow=ERzeroToMany;endFill=1;html=1;fontSize=11;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="c1" target="c2"><mxGeometry x="-0.08" relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="c8" value="tạo ▸" style="startArrow=ERmandOne;startFill=1;endArrow=ERzeroToMany;endFill=1;html=1;fontSize=11;rounded=0;exitX=0.8;exitY=0;exitDx=0;exitDy=0;entryX=0.2;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="c1" target="c3"><mxGeometry x="0" relative="1" as="geometry"><Array as="points"><mxPoint x="251" y="156"/><mxPoint x="387" y="156"/></Array></mxGeometry></mxCell>
+        <mxCell id="c9" value="liên kết ▴" style="startArrow=ERmandOne;startFill=1;endArrow=ERzeroToMany;endFill=1;html=1;fontSize=11;rounded=0;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="c1" target="c4"><mxGeometry x="-0.16" relative="1" as="geometry"><mxPoint x="-39" y="0" as="offset"/></mxGeometry></mxCell>
+        <mxCell id="c10" value="phân bổ ▾" style="startArrow=ERmandOne;startFill=1;endArrow=ERzeroToMany;endFill=1;html=1;fontSize=11;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="c5" target="c6"><mxGeometry x="-0.16" relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="c11" value="chuyển vào ▸" style="startArrow=ERzeroToMany;startFill=1;endArrow=ERmandOne;endFill=1;html=1;fontSize=11;rounded=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="c6" target="c1"><mxGeometry x="0.08" relative="1" as="geometry"></mxGeometry></mxCell>
+        <mxCell id="legend-1" value="⊣⊢ đúng một   ·   ⊣○ không hoặc một   ·   ⊣&amp;lt; một hoặc nhiều   ·   ○&amp;lt; không hoặc nhiều   ·   ▐▌ thực thể lõi (viền 3px)" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;strokeColor=none;fillColor=none;fontSize=10.5;erdLang=vi;" vertex="1" parent="1"><mxGeometry x="10" y="280" width="611.2" height="20" as="geometry"/></mxCell>
+        <mxCell id="legend-2" value="Luồng: Tài chính" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;strokeColor=none;fillColor=none;fontSize=10.5;" vertex="1" parent="1"><mxGeometry x="10" y="300" width="611.2" height="16" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
