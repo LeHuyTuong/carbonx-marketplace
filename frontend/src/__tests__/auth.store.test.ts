@@ -47,10 +47,14 @@ describe('auth store — setAuth / logout', () => {
 })
 
 describe('normalizeRole', () => {
-  it('đổi alias CC_BUYER của backend thành COMPANY', () => {
+  it('đổi alias CC_BUYER của backend thành COMPANY và chuẩn hoá prefix ROLE_', () => {
     expect(normalizeRole('CC_BUYER')).toBe('COMPANY')
     expect(normalizeRole('BUYER')).toBe('COMPANY')
-    expect(toBackendRole('COMPANY')).toBe('CC_BUYER')
+    expect(normalizeRole('ROLE_ADMIN')).toBe('ADMIN')
+    expect(normalizeRole('ROLE_COMPANY')).toBe('COMPANY')
+    expect(normalizeRole('ROLE_EV_OWNER')).toBe('EV_OWNER')
+    expect(normalizeRole('ROLE_CVA')).toBe('CVA')
+    expect(toBackendRole('COMPANY')).toBe('ROLE_COMPANY')
   })
 
   it('đổi alias EV và chấp nhận role viết thường / có khoảng trắng', () => {

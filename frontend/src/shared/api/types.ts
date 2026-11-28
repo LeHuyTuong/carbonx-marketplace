@@ -19,6 +19,8 @@ export interface AuthPayload {
   token?: string
   userId?: number
   companyId?: number | null
+  email?: string
+  fullName?: string
   roles?: string[]
   role?: string
   message?: string

@@ -10,8 +10,9 @@ const ROLE_ALIASES: Record<string, Role> = {
 export function normalizeRole(value: unknown): Role | null {
   if (typeof value !== 'string') return null
   const upper = value.trim().toUpperCase()
-  if (ROLE_ALIASES[upper]) return ROLE_ALIASES[upper]
-  return (ROLES as readonly string[]).includes(upper) ? (upper as Role) : null
+  const stripped = upper.startsWith('ROLE_') ? upper.slice(5) : upper
+  if (ROLE_ALIASES[stripped]) return ROLE_ALIASES[stripped]
+  return (ROLES as readonly string[]).includes(stripped) ? (stripped as Role) : null
 }
 
 export function toBackendRole(role: Role): string {
